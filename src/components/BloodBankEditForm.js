@@ -1,5 +1,5 @@
 // src/components/BloodBankEditForm.js
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
   doc,
@@ -22,7 +22,7 @@ import AlertManager from "./AlertManager";
  * - approve/reject donations & requests (with stock checks)
  * - in‑app notifications
  * - urgent alerts manager
- * - NEW: Schedule Donation History + Blood Request History
+ * - Schedule Donation History + Blood Request History
  * - compatible with bloodGroup OR bloodGroups fields
  * - compatible with bloodBankId OR bankId fields
  */
@@ -35,7 +35,7 @@ export default function BloodBankEditForm() {
   const [pendingDonations, setPendingDonations] = useState([]);
   const [pendingRequests, setPendingRequests] = useState([]);
 
-  // NEW: histories (approved/rejected)
+  // histories (approved/rejected)
   const [historyDonations, setHistoryDonations] = useState([]);
   const [historyRequests, setHistoryRequests] = useState([]);
   const [showAllDonHistory, setShowAllDonHistory] = useState(false);
@@ -139,7 +139,7 @@ export default function BloodBankEditForm() {
     };
   }, [id]);
 
-  // NEW: Donation history (approved/rejected), both field names + sorted newest first
+  // Donation history (approved/rejected), newest first
   useEffect(() => {
     const col = collection(db, "donation_schedules");
 
@@ -148,8 +148,7 @@ export default function BloodBankEditForm() {
       (snap) => {
         const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
         setHistoryDonations((prev) => mergeReplace(prev, rows));
-      },
-      // If composite index is missing, Firestore will hint it in console. You can create when convenient.
+      }
     );
 
     const unsub2 = onSnapshot(
@@ -166,7 +165,7 @@ export default function BloodBankEditForm() {
     };
   }, [id]);
 
-  // NEW: Request history (approved/rejected), both field names + sorted newest first
+  // Request history (approved/rejected), newest first
   useEffect(() => {
     const col = collection(db, "blood_requests");
 
@@ -317,13 +316,13 @@ export default function BloodBankEditForm() {
     }
   };
 
-  const supportedGroups = useMemo(() => {
-    return Array.isArray(bloodBank.bloodGroup)
+  // no hook: compute directly, always runs
+  const supportedGroups =
+    Array.isArray(bloodBank.bloodGroup)
       ? bloodBank.bloodGroup
       : Array.isArray(bloodBank.bloodGroups)
       ? bloodBank.bloodGroups
       : [];
-  }, [bloodBank?.bloodGroup, bloodBank?.bloodGroups]);
 
   // row renderer for history
   const renderRow = (item, type) => {
@@ -331,7 +330,7 @@ export default function BloodBankEditForm() {
       <li key={item.id} className={`p-3 rounded border ${statusClass(item.status)} text-sm`}>
         <div className="flex justify-between gap-3">
           <div className="space-y-0.5">
-            <div className="font-semibold capitalize">{(item.status || "pending")}</div>
+            <div className="font-semibold capitalize">{item.status || "pending"}</div>
             <div>
               {type === "donation" ? (
                 <>
@@ -346,12 +345,17 @@ export default function BloodBankEditForm() {
                 </>
               )}
             </div>
-            <div className="text-gray-700">{item.date ? toDateString(item.date) : (item.time ? item.time : "")}</div>
+            <div className="text-gray-700">
+              {item.date ? toDateString(item.date) : item.time ? item.time : ""}
+            </div>
             {item.notes && <div className="text-gray-600">Notes: {item.notes}</div>}
           </div>
           <button
             className="shrink-0 h-8 px-3 rounded bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold"
-            onClick={() => { setSelectedItem(item); setModalType(type === "donation" ? "donation" : "request"); }}
+            onClick={() => {
+              setSelectedItem(item);
+              setModalType(type === "donation" ? "donation" : "request");
+            }}
           >
             View
           </button>
@@ -374,9 +378,15 @@ export default function BloodBankEditForm() {
       <div className="flex flex-col md:flex-row gap-6 p-6 max-w-6xl mx-auto mt-2">
         <div className="md:w-1/3 bg-white rounded-lg shadow p-6 space-y-2">
           <h2 className="text-2xl font-bold text-center">{bloodBank.name}</h2>
-          <p><strong>Location:</strong> {bloodBank.address || bloodBank.location || "N/A"}</p>
-          <p><strong>Contact:</strong> {bloodBank.contactNumber || bloodBank.contact || "N/A"}</p>
-          <p><strong>Email:</strong> {bloodBank.email || "N/A"}</p>
+          <p>
+            <strong>Location:</strong> {bloodBank.address || bloodBank.location || "N/A"}
+          </p>
+          <p>
+            <strong>Contact:</strong> {bloodBank.contactNumber || bloodBank.contact || "N/A"}
+          </p>
+          <p>
+            <strong>Email:</strong> {bloodBank.email || "N/A"}
+          </p>
           <div className="flex gap-2 pt-3">
             <button
               className="bg-red-600 text-white font-semibold rounded px-3 py-1 hover:bg-red-700"
@@ -417,8 +427,18 @@ export default function BloodBankEditForm() {
                 )}
                 <span className="text-2xl font-mono mb-2">{qty}</span>
                 <div className="flex gap-2">
-                  <button onClick={() => dec(group)} className="bg-red-800 hover:bg-red-900 rounded px-4 py-1 font-semibold">–</button>
-                  <button onClick={() => inc(group)} className="bg-green-800 hover:bg-green-900 rounded px-4 py-1 font-semibold">+</button>
+                  <button
+                    onClick={() => dec(group)}
+                    className="bg-red-800 hover:bg-red-900 rounded px-4 py-1 font-semibold"
+                  >
+                    –
+                  </button>
+                  <button
+                    onClick={() => inc(group)}
+                    className="bg-green-800 hover:bg-green-900 rounded px-4 py-1 font-semibold"
+                  >
+                    +
+                  </button>
                 </div>
               </div>
             );
@@ -432,9 +452,13 @@ export default function BloodBankEditForm() {
         {pendingDonations.length ? (
           <ul className="space-y-2">
             {pendingDonations.map((don) => (
-              <li key={don.id} className={`flex justify-between items-center p-2 border rounded ${statusClass(don.status)}`}>
+              <li
+                key={don.id}
+                className={`flex justify-between items-center p-2 border rounded ${statusClass(don.status)}`}
+              >
                 <span>
-                  {don.donorName || don.name || "Donor"} – {don.bloodGroup || "N/A"} – {toDateString(don.date)}
+                  {don.donorName || don.name || "Donor"} – {don.bloodGroup || "N/A"} –{" "}
+                  {toDateString(don.date)}
                 </span>
                 <div className="flex gap-2">
                   {(!don.status || (don.status || "").toLowerCase() === "pending") && (
@@ -455,7 +479,10 @@ export default function BloodBankEditForm() {
                   )}
                   <button
                     className="bg-blue-600 text-white px-3 py-1 rounded hover:bg-blue-700"
-                    onClick={() => { setSelectedItem(don); setModalType("donation"); }}
+                    onClick={() => {
+                      setSelectedItem(don);
+                      setModalType("donation");
+                    }}
                   >
                     View
                   </button>
@@ -474,9 +501,13 @@ export default function BloodBankEditForm() {
         {pendingRequests.length ? (
           <ul className="space-y-2">
             {pendingRequests.map((req) => (
-              <li key={req.id} className={`flex justify-between items-center p-2 border rounded ${statusClass(req.status)}`}>
+              <li
+                key={req.id}
+                className={`flex justify-between items-center p-2 border rounded ${statusClass(req.status)}`}
+              >
                 <span>
-                  {req.requesterName || req.name || "Requester"} – {req.bloodGroup || "N/A"} – {req.units || 0} unit(s) – {toDateString(req.date)}
+                  {req.requesterName || req.name || "Requester"} – {req.bloodGroup || "N/A"} –{" "}
+                  {req.units || 0} unit(s) – {toDateString(req.date)}
                 </span>
                 <div className="flex gap-2">
                   {(!req.status || (req.status || "").toLowerCase() === "pending") && (
@@ -497,7 +528,10 @@ export default function BloodBankEditForm() {
                   )}
                   <button
                     className="bg-blue-600 text-white px-3 py-1 rounded hover:bg-blue-700"
-                    onClick={() => { setSelectedItem(req); setModalType("request"); }}
+                    onClick={() => {
+                      setSelectedItem(req);
+                      setModalType("request");
+                    }}
                   >
                     View
                   </button>
@@ -510,7 +544,7 @@ export default function BloodBankEditForm() {
         )}
       </div>
 
-      {/* NEW: Donation History */}
+      {/* Donation History */}
       <div className="max-w-6xl mx-auto p-6 bg-white rounded-lg shadow">
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-xl font-bold text-red-600">Schedule Donation History</h3>
@@ -534,7 +568,7 @@ export default function BloodBankEditForm() {
         )}
       </div>
 
-      {/* NEW: Blood Request History */}
+      {/* Blood Request History */}
       <div className="max-w-6xl mx-auto p-6 bg-white rounded-lg shadow mb-8">
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-xl font-bold text-red-600">Blood Request History</h3>
@@ -595,9 +629,7 @@ export default function BloodBankEditForm() {
   );
 }
 
-/* CSS tip: in your global CSS, add:
-
+/* CSS tip: add once in your global CSS (e.g., index.css or App.css)
 @keyframes card-shake { 0%{transform:translateX(0)} 25%{transform:translateX(-3px)} 50%{transform:translateX(3px)} 75%{transform:translateX(-3px)} 100%{transform:translateX(0)} }
 .animate-shake { animation: card-shake 0.35s ease-in-out 2; }
-
 */
