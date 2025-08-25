@@ -1,88 +1,83 @@
-import React, { useEffect, useMemo, useState } from "react";
-import { collection, getDocs } from "firebase/firestore";
-import { db } from "./firebase";
-import { useNavigate } from "react-router-dom";
+import React, { useEffect, useState } from 'react';
+import { collection, getDocs } from 'firebase/firestore';
+import { db } from './firebase'; // adjust path if needed
+import { useNavigate } from 'react-router-dom';
 
-export default function FindBloodBank() {
-  const [banks, setBanks] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [err, setErr] = useState("");
-
-  const [search, setSearch] = useState("");
-  const MIN_CHARS = 1; // show results only when search length >= MIN_CHARS
+const FindBloodBank = () => {
+  const [bloodBanks, setBloodBanks] = useState([]);
+  const [search, setSearch] = useState('');
+  const [filter, setFilter] = useState('');
   const navigate = useNavigate();
 
+  // Fetch data from Firestore
   useEffect(() => {
-    (async () => {
+    const fetchBloodBanks = async () => {
       try {
-        const snap = await getDocs(collection(db, "BloodBanks"));
-        const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-        setBanks(rows);
-      } catch (e) {
-        console.error("Could not load blood banks:", e);
-        setErr("Could not load blood banks.");
-      } finally {
-        setLoading(false);
+        const querySnapshot = await getDocs(collection(db, 'BloodBanks'));
+        const data = querySnapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data()
+        }));
+        setBloodBanks(data);
+      } catch (error) {
+        console.error('Error fetching blood banks:', error);
       }
-    })();
+    };
+    fetchBloodBanks();
   }, []);
 
-  const q = search.trim().toLowerCase();
-  const filtered = useMemo(() => {
-    if (q.length < MIN_CHARS) return [];
-    return banks.filter((b) => {
-      const name = (b.name || "").toLowerCase();
-      const addr = (b.address || b.location || b.city || "").toLowerCase();
-      return name.includes(q) || addr.includes(q);
-    });
-  }, [banks, q]);
-
-  const openFirstIfEnter = (e) => {
-    if (e.key === "Enter" && filtered.length > 0) {
-      navigate(`/bloodbank/${filtered[0].id}`);
-    }
-  };
-
-  if (loading) return <div className="p-4">Loading…</div>;
-  if (err) return <div className="p-4 text-red-600">{err}</div>;
+  // Filter results
+  const filteredBloodBanks = bloodBanks.filter(bank => {
+    const matchesSearch = bank.name.toLowerCase().includes(search.toLowerCase());
+    const matchesFilter = filter ? bank.bloodGroups?.includes(filter) : true;
+    return matchesSearch && matchesFilter;
+  });
 
   return (
     <div className="p-4">
       <h1 className="text-2xl font-bold mb-4">Find Nearest Blood Bank</h1>
 
+      {/* Search bar */}
       <input
         type="text"
+        placeholder="Search by name..."
         value={search}
         onChange={(e) => setSearch(e.target.value)}
-        onKeyDown={openFirstIfEnter}
-        placeholder="Type a bank name or address…"
         className="border p-2 rounded w-full mb-3"
       />
 
-      {/* Only render the list after the user starts typing */}
-      {q.length >= MIN_CHARS ? (
-        filtered.length === 0 ? (
-          <div className="text-sm text-gray-600">No matches.</div>
-        ) : (
-          <ul className="space-y-3">
-            {filtered.map((bank) => (
-              <li
-                key={bank.id}
-                onClick={() => navigate(`/bloodbank/${bank.id}`)}
-                className="p-3 border rounded cursor-pointer hover:bg-gray-100"
-              >
-                <h2 className="font-semibold">{bank.name || "Blood Bank"}</h2>
-                <p className="text-sm text-gray-600">
-                  {bank.address || bank.location || bank.city || "Location N/A"}
-                </p>
-                {bank.contact && (
-                  <p className="text-xs text-gray-500 mt-1">📞 {bank.contact}</p>
-                )}
-              </li>
-            ))}
-          </ul>
-        )
-      ) : null}
+      {/* Dropdown filter */}
+      <select
+        value={filter}
+        onChange={(e) => setFilter(e.target.value)}
+        className="border p-2 rounded w-full mb-4"
+      >
+        <option value="">Filter by Blood Group</option>
+        <option value="A+">A+</option>
+        <option value="A-">A-</option>
+        <option value="B+">B+</option>
+        <option value="B-">B-</option>
+        <option value="O+">O+</option>
+        <option value="O-">O-</option>
+        <option value="AB+">AB+</option>
+        <option value="AB-">AB-</option>
+      </select>
+
+      {/* List of results */}
+      <ul className="space-y-3">
+        {filteredBloodBanks.map((bank) => (
+          <li
+            key={bank.id}
+            onClick={() => navigate(`/bloodbank/${bank.id}`)}
+            className="p-3 border rounded cursor-pointer hover:bg-gray-100"
+          >
+            <h2 className="font-semibold">{bank.name}</h2>
+            <p className="text-sm text-gray-600">{bank.location}</p>
+          </li>
+        ))}
+      </ul>
     </div>
   );
-}
+};
+
+export default FindBloodBank;
