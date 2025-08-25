@@ -1,27 +1,33 @@
-// src/components/login.js
 import React, { useState } from "react";
 import { signInWithEmailAndPassword } from "firebase/auth";
-import { auth } from "./firebase";
+import { auth, db } from "./firebase";
+import { doc, getDoc } from "firebase/firestore";
 import { Link, useNavigate } from "react-router-dom";
 
 export default function Login() {
   const navigate = useNavigate();
-  const [form, setForm] = useState({ email: "", password: "" });
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
-
-  const onChange = (e) =>
-    setForm((f) => ({ ...f, [e.target.name]: e.target.value }));
 
   const onSubmit = async (e) => {
     e.preventDefault();
     setErr("");
     setLoading(true);
     try {
-      await signInWithEmailAndPassword(auth, form.email.trim(), form.password);
-      navigate("/home");
+      const cred = await signInWithEmailAndPassword(auth, email.trim(), password);
+      const { uid } = cred.user;
+
+      // Old behavior: if this uid has a BloodBanks doc, go straight to editor
+      const bbSnap = await getDoc(doc(db, "BloodBanks", uid));
+      if (bbSnap.exists()) {
+        navigate(`/bloodbank/edit/${uid}`);
+      } else {
+        navigate("/home");
+      }
     } catch (e) {
-      setErr(e.message || "Login failed");
+      setErr(e?.message || "Login failed");
     } finally {
       setLoading(false);
     }
@@ -44,22 +50,21 @@ export default function Login() {
             <input
               className="input w-full"
               type="email"
-              name="email"
-              value={form.email}
-              onChange={onChange}
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
               placeholder="you@example.com"
               required
             />
           </div>
+
           <div>
             <label className="block text-sm font-medium mb-1">Password</label>
             <input
               className="input w-full"
               type="password"
-              name="password"
-              value={form.password}
-              onChange={onChange}
-              placeholder="••••••••"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="Your password"
               required
             />
           </div>
@@ -74,9 +79,9 @@ export default function Login() {
         </form>
 
         <p className="mt-4 text-right text-gray-600">
-          New user?{" "}
+          New here?{" "}
           <Link to="/register" className="text-red-600 hover:underline">
-            Register Here
+            Register
           </Link>
         </p>
       </div>
