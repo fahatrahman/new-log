@@ -69,11 +69,18 @@ export default function Home() {
         const banks = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
         setBloodBanks(banks);
         setBanksCount(banks.length);
+        // ✅ show all by default
+        setFilteredBanks(banks);
       } catch (err) {
         console.error("Error fetching blood banks:", err);
       }
     })();
   }, []);
+
+  // Keep filtered list in sync if data loads after mount
+  useEffect(() => {
+    if (!searchTerm.trim()) setFilteredBanks(bloodBanks);
+  }, [bloodBanks, searchTerm]);
 
   // Load alerts + eligibility prompt for signed-in users
   useEffect(() => {
@@ -81,12 +88,11 @@ export default function Home() {
       if (!u) {
         setShowEligibilityBanner(false);
         setCheckingEligibility(false);
-        const qAll = query(
-          collection(db, "alerts"),
-          where("active", "==", true)
-        );
-        const all = await getDocs(qAll);
-        setAlerts(all.docs.map((d) => ({ id: d.id, ...d.data() })));
+        try {
+          const qAll = query(collection(db, "alerts"), where("active", "==", true));
+          const all = await getDocs(qAll);
+          setAlerts(all.docs.map((d) => ({ id: d.id, ...d.data() })));
+        } catch {}
         return;
       }
 
@@ -97,16 +103,12 @@ export default function Home() {
           const passed = data?.eligibility?.passed;
           setShowEligibilityBanner(passed !== true);
 
-          const activeQ = query(
-            collection(db, "alerts"),
-            where("active", "==", true)
-          );
+          const activeQ = query(collection(db, "alerts"), where("active", "==", true));
           const snap = await getDocs(activeQ);
           const all = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
           const preferred = all.filter(
             (a) =>
-              (!data.city ||
-                a.city?.toLowerCase() === data.city?.toLowerCase()) &&
+              (!data.city || a.city?.toLowerCase() === data.city?.toLowerCase()) &&
               (!data.bloodGroup || a.bloodGroup === data.bloodGroup)
           );
           setAlerts(preferred.length ? preferred : all);
@@ -126,14 +128,12 @@ export default function Home() {
   useEffect(() => {
     (async () => {
       try {
-        // Donors (role=user)
         const usersSnap = await getDocs(collection(db, "Users"));
         const donors = usersSnap.docs.filter(
           (d) => (d.data().role || "user") === "user"
         );
         setDonorCount(donors.length);
 
-        // Units delivered in last 30 days (approved requests)
         const start30 = new Date();
         start30.setDate(start30.getDate() - 30);
         const ts30 = Timestamp.fromDate(start30);
@@ -177,7 +177,6 @@ export default function Home() {
         }, 0);
         setUnitsDelivered30d(units);
 
-        // Upcoming drives (next 3)
         const now = new Date();
         const donSnap = await getDocs(
           query(collection(db, "donation_schedules"), orderBy("timestamp", "desc"), limit(400))
@@ -213,16 +212,22 @@ export default function Home() {
     })();
   }, []);
 
-  // --- Search handler (filters the in-memory list) ---
+  // --- Search handler ---
   const handleSearchChange = (e) => {
     const value = e.target.value;
     setSearchTerm(value);
-    if (value.trim() === "") return setFilteredBanks([]);
+
+    const v = value.trim().toLowerCase();
+    if (!v) {
+      // ✅ when empty, show full list
+      setFilteredBanks(bloodBanks);
+      return;
+    }
 
     const filtered = bloodBanks.filter((bank) => {
       const name = (bank.name || "").toLowerCase();
       const address = (bank.address || bank.location || bank.city || "").toLowerCase();
-      return name.includes(value.toLowerCase()) || address.includes(value.toLowerCase());
+      return name.includes(v) || address.includes(v);
     });
     setFilteredBanks(filtered);
   };
@@ -240,21 +245,35 @@ export default function Home() {
     <div className="min-h-screen flex flex-col">
       {/* HERO */}
       <div className="relative h-[22rem] md:h-[26rem] w-full overflow-hidden">
-        <img src={bannerImage} alt="Donate blood" className="absolute inset-0 w-full h-full object-cover" />
+        <img
+          src={bannerImage}
+          alt="Donate blood"
+          className="absolute inset-0 w-full h-full object-cover"
+        />
         <div className="absolute inset-0 bg-black/40" />
         <div className="relative z-10 max-w-5xl mx-auto h-full px-4 flex flex-col items-start justify-center text-white">
           <h1 className="text-3xl md:text-4xl font-bold leading-tight">Save Lives Today</h1>
           <p className="mt-2 text-sm md:text-base text-white/90 max-w-xl">
-            Request blood when you need it, or schedule a donation with nearby blood banks. Every drop matters.
+            Request blood when you need it, or schedule a donation with nearby
+            blood banks. Every drop matters.
           </p>
           <div className="mt-4 flex gap-2">
-            <Link to="/request-blood" className="bg-white text-red-600 font-semibold px-4 py-2 rounded-md shadow hover:bg-red-50">
+            <Link
+              to="/request-blood"
+              className="bg-white text-red-600 font-semibold px-4 py-2 rounded-md shadow hover:bg-red-50"
+            >
               Request Blood
             </Link>
-            <Link to="/schedule-donation" className="bg-red-600/90 text-white font-semibold px-4 py-2 rounded-md shadow hover:bg-red-700">
+            <Link
+              to="/schedule-donation"
+              className="bg-red-600/90 text-white font-semibold px-4 py-2 rounded-md shadow hover:bg-red-700"
+            >
               Become a Donor
             </Link>
-            <a href="#find" className="bg-white/10 text-white font-semibold px-4 py-2 rounded-md border border-white/30 hover:bg-white/20">
+            <a
+              href="#find"
+              className="bg-white/10 text-white font-semibold px-4 py-2 rounded-md border border-white/30 hover:bg-white/20"
+            >
               Find Blood Bank
             </a>
           </div>
@@ -300,13 +319,22 @@ export default function Home() {
           <div className="rounded-lg border border-yellow-300 bg-yellow-50 text-yellow-900 p-4 flex items-start justify-between gap-4">
             <div>
               <p className="font-semibold">Complete your Donor Eligibility</p>
-              <p className="text-sm">Before scheduling a donation, please complete the quick eligibility checklist.</p>
+              <p className="text-sm">
+                Before scheduling a donation, please complete the quick
+                eligibility checklist.
+              </p>
             </div>
             <div className="flex shrink-0 gap-2">
-              <Link to="/eligibility" className="px-3 py-2 rounded bg-red-600 text-white text-sm font-semibold hover:bg-red-700">
+              <Link
+                to="/eligibility"
+                className="px-3 py-2 rounded bg-red-600 text-white text-sm font-semibold hover:bg-red-700"
+              >
                 Check now
               </Link>
-              <button onClick={() => setShowEligibilityBanner(false)} className="px-3 py-2 rounded border border-yellow-300 text-yellow-900 text-sm hover:bg-yellow-100">
+              <button
+                onClick={() => setShowEligibilityBanner(false)}
+                className="px-3 py-2 rounded border border-yellow-300 text-yellow-900 text-sm hover:bg-yellow-100"
+              >
                 Dismiss
               </button>
             </div>
@@ -346,7 +374,7 @@ export default function Home() {
           onChange={handleSearchChange}
           className="input"
         />
-        {filteredBanks.length > 0 && (
+        {filteredBanks.length > 0 ? (
           <ul className="max-h-72 overflow-y-auto text-left bg-white border border-gray-300 rounded-md shadow-md mt-4">
             {filteredBanks.map((bank) => (
               <li
@@ -356,11 +384,13 @@ export default function Home() {
               >
                 <strong className="block">{bank.name}</strong>
                 <span className="text-sm text-gray-600">
-                  {bank.address || bank.location || "Location N/A"}
+                  {(bank.address || bank.location || bank.city) ?? "Location N/A"}
                 </span>
               </li>
             ))}
           </ul>
+        ) : (
+          <div className="text-sm text-gray-500 mt-3">No matching blood banks.</div>
         )}
       </div>
 
