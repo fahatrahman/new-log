@@ -1,5 +1,5 @@
 // src/components/BloodBankEditForm.js
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
   doc,
@@ -10,22 +10,21 @@ import {
   where,
   addDoc,
   serverTimestamp,
-  getDocs,
+  orderBy,
 } from "firebase/firestore";
 import { db } from "./firebase";
 import { getAuth, signOut } from "firebase/auth";
 import AlertManager from "./AlertManager";
 
 /**
- * This is your original editor restored with:
+ * Blood bank inventory + moderation screen
  * - live stock editing (± per group)
- * - inline details display
- * - moderate donation/blood requests (approve/reject) with stock checks
- * - urgent alerts section
- *
- * Plus small compatibility upgrades:
- * - Reads supported groups from `bloodGroup` OR `bloodGroups`
- * - Reads/filters pending items by `bloodBankId` OR `bankId`
+ * - approve/reject donations & requests (with stock checks)
+ * - in‑app notifications
+ * - urgent alerts manager
+ * - NEW: Schedule Donation History + Blood Request History
+ * - compatible with bloodGroup OR bloodGroups fields
+ * - compatible with bloodBankId OR bankId fields
  */
 export default function BloodBankEditForm() {
   const { id } = useParams();
@@ -35,6 +34,12 @@ export default function BloodBankEditForm() {
   const [bloodStock, setBloodStock] = useState({});
   const [pendingDonations, setPendingDonations] = useState([]);
   const [pendingRequests, setPendingRequests] = useState([]);
+
+  // NEW: histories (approved/rejected)
+  const [historyDonations, setHistoryDonations] = useState([]);
+  const [historyRequests, setHistoryRequests] = useState([]);
+  const [showAllDonHistory, setShowAllDonHistory] = useState(false);
+  const [showAllReqHistory, setShowAllReqHistory] = useState(false);
 
   const [selectedItem, setSelectedItem] = useState(null);
   const [modalType, setModalType] = useState(""); // "donation" | "request"
@@ -76,7 +81,6 @@ export default function BloodBankEditForm() {
       const data = snap.data();
       setBloodBank(data);
 
-      // accept either bloodGroup (array) or bloodGroups (array)
       const supported = Array.isArray(data.bloodGroup)
         ? data.bloodGroup
         : Array.isArray(data.bloodGroups)
@@ -91,7 +95,7 @@ export default function BloodBankEditForm() {
     return () => unsub();
   }, [id]);
 
-  // Pending donations for this bank (support both field names)
+  // Pending donations (bankId OR bloodBankId)
   useEffect(() => {
     const col = collection(db, "donation_schedules");
 
@@ -113,7 +117,7 @@ export default function BloodBankEditForm() {
     };
   }, [id]);
 
-  // Pending blood requests (support both field names)
+  // Pending blood requests (bankId OR bloodBankId)
   useEffect(() => {
     const col = collection(db, "blood_requests");
 
@@ -135,10 +139,70 @@ export default function BloodBankEditForm() {
     };
   }, [id]);
 
+  // NEW: Donation history (approved/rejected), both field names + sorted newest first
+  useEffect(() => {
+    const col = collection(db, "donation_schedules");
+
+    const unsub1 = onSnapshot(
+      query(col, where("bloodBankId", "==", id), where("status", "in", ["approved", "rejected"]), orderBy("timestamp", "desc")),
+      (snap) => {
+        const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        setHistoryDonations((prev) => mergeReplace(prev, rows));
+      },
+      // If composite index is missing, Firestore will hint it in console. You can create when convenient.
+    );
+
+    const unsub2 = onSnapshot(
+      query(col, where("bankId", "==", id), where("status", "in", ["approved", "rejected"]), orderBy("timestamp", "desc")),
+      (snap) => {
+        const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        setHistoryDonations((prev) => mergeReplace(prev, rows));
+      }
+    );
+
+    return () => {
+      unsub1();
+      unsub2();
+    };
+  }, [id]);
+
+  // NEW: Request history (approved/rejected), both field names + sorted newest first
+  useEffect(() => {
+    const col = collection(db, "blood_requests");
+
+    const unsub1 = onSnapshot(
+      query(col, where("bloodBankId", "==", id), where("status", "in", ["approved", "rejected"]), orderBy("timestamp", "desc")),
+      (snap) => {
+        const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        setHistoryRequests((prev) => mergeReplace(prev, rows));
+      }
+    );
+
+    const unsub2 = onSnapshot(
+      query(col, where("bankId", "==", id), where("status", "in", ["approved", "rejected"]), orderBy("timestamp", "desc")),
+      (snap) => {
+        const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        setHistoryRequests((prev) => mergeReplace(prev, rows));
+      }
+    );
+
+    return () => {
+      unsub1();
+      unsub2();
+    };
+  }, [id]);
+
+  // helpers
   const mergeUniqueById = (a, b) => {
     const map = new Map();
     [...a, ...b].forEach((x) => map.set(x.id, x));
     return Array.from(map.values());
+  };
+  const mergeReplace = (a, b) => {
+    const map = new Map(a.map((x) => [x.id, x]));
+    b.forEach((x) => map.set(x.id, x));
+    // sort newest first by timestamp.seconds (fallback to 0)
+    return [...map.values()].sort((x, y) => (y?.timestamp?.seconds || 0) - (x?.timestamp?.seconds || 0));
   };
 
   const pushStock = async (updated) => {
@@ -163,7 +227,7 @@ export default function BloodBankEditForm() {
     pushStock(next);
   };
 
-  // in‑app notification helper (unchanged)
+  // in‑app notification
   const createNotification = async ({ userId, kind, refId, status, message }) => {
     try {
       await addDoc(collection(db, "notifications"), {
@@ -206,10 +270,10 @@ export default function BloodBankEditForm() {
         await pushStock(next);
       }
 
-      // Update status in Firestore (donations or requests)
+      // Update status
       await updateDoc(doc(db, colName, item.id), { status: newStatus.toLowerCase() });
 
-      // create in‑app notification
+      // Notify requester/donor
       if (colName === "blood_requests") {
         await createNotification({
           userId: item.userId,
@@ -228,7 +292,7 @@ export default function BloodBankEditForm() {
         });
       }
 
-      // Remove from local pending lists + close modal
+      // Update local state
       if (colName === "donation_schedules") {
         setPendingDonations((prev) => prev.filter((d) => d.id !== item.id));
       } else if (colName === "blood_requests") {
@@ -253,38 +317,55 @@ export default function BloodBankEditForm() {
     }
   };
 
-  // prefer bloodGroup array (original); fallback to bloodGroups
-  const supportedGroups = Array.isArray(bloodBank.bloodGroup)
-    ? bloodBank.bloodGroup
-    : Array.isArray(bloodBank.bloodGroups)
-    ? bloodBank.bloodGroups
-    : [];
+  const supportedGroups = useMemo(() => {
+    return Array.isArray(bloodBank.bloodGroup)
+      ? bloodBank.bloodGroup
+      : Array.isArray(bloodBank.bloodGroups)
+      ? bloodBank.bloodGroups
+      : [];
+  }, [bloodBank?.bloodGroup, bloodBank?.bloodGroups]);
+
+  // row renderer for history
+  const renderRow = (item, type) => {
+    return (
+      <li key={item.id} className={`p-3 rounded border ${statusClass(item.status)} text-sm`}>
+        <div className="flex justify-between gap-3">
+          <div className="space-y-0.5">
+            <div className="font-semibold capitalize">{(item.status || "pending")}</div>
+            <div>
+              {type === "donation" ? (
+                <>
+                  <span className="font-medium">{item.donorName || item.name || "Donor"}</span>
+                  {item.bloodGroup && <> · {item.bloodGroup}</>}
+                </>
+              ) : (
+                <>
+                  <span className="font-medium">{item.requesterName || item.name || "Requester"}</span>
+                  {item.bloodGroup && <> · {item.bloodGroup}</>}
+                  {item.units && <> · {item.units} unit(s)</>}
+                </>
+              )}
+            </div>
+            <div className="text-gray-700">{item.date ? toDateString(item.date) : (item.time ? item.time : "")}</div>
+            {item.notes && <div className="text-gray-600">Notes: {item.notes}</div>}
+          </div>
+          <button
+            className="shrink-0 h-8 px-3 rounded bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold"
+            onClick={() => { setSelectedItem(item); setModalType(type === "donation" ? "donation" : "request"); }}
+          >
+            View
+          </button>
+        </div>
+      </li>
+    );
+  };
 
   return (
     <div className="min-h-screen flex flex-col gap-8">
-      {/* Lightweight header */}
-      <nav className="bg-red-600 text-white sticky top-0 z-50 flex justify-between items-center px-6 py-3 font-bold text-lg">
-        <button onClick={() => navigate(`/bloodbank/${id}`)} className="hover:opacity-90">
-          {bloodBank?.name || "Blood Bank"}
-        </button>
-        <div className="flex gap-2">
-          <button
-            className="bg-white text-red-600 font-semibold rounded px-3 py-1 hover:bg-red-100"
-            onClick={() => navigate("/home")}
-          >
-            Home
-          </button>
-          <button
-            className="bg-white text-red-600 font-semibold rounded px-3 py-1 hover:bg-red-100"
-            onClick={handleLogout}
-          >
-            Logout
-          </button>
-        </div>
-      </nav>
+      {/* (No local header nav—use global Navbar) */}
 
       {stockWarning && (
-        <p className="max-w-6xl mx-auto p-2 bg-yellow-100 text-red-700 font-semibold rounded mb-4 text-center animate-pulse">
+        <p className="max-w-6xl mx-auto p-2 bg-yellow-100 text-red-700 font-semibold rounded mb-1 text-center animate-pulse">
           {stockWarning}
         </p>
       )}
@@ -296,7 +377,21 @@ export default function BloodBankEditForm() {
           <p><strong>Location:</strong> {bloodBank.address || bloodBank.location || "N/A"}</p>
           <p><strong>Contact:</strong> {bloodBank.contactNumber || bloodBank.contact || "N/A"}</p>
           <p><strong>Email:</strong> {bloodBank.email || "N/A"}</p>
-          <p className="mt-4 text-sm text-gray-600 text-center">Use the controls to adjust stock.</p>
+          <div className="flex gap-2 pt-3">
+            <button
+              className="bg-red-600 text-white font-semibold rounded px-3 py-1 hover:bg-red-700"
+              onClick={() => navigate(`/bloodbank/${id}`)}
+            >
+              View public page
+            </button>
+            <button
+              className="bg-gray-200 text-gray-800 font-semibold rounded px-3 py-1 hover:bg-gray-300"
+              onClick={handleLogout}
+            >
+              Logout
+            </button>
+          </div>
+          <p className="mt-3 text-xs text-gray-500 text-center">Use the controls to adjust stock.</p>
         </div>
 
         <div className="md:w-2/3 grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -415,6 +510,54 @@ export default function BloodBankEditForm() {
         )}
       </div>
 
+      {/* NEW: Donation History */}
+      <div className="max-w-6xl mx-auto p-6 bg-white rounded-lg shadow">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-xl font-bold text-red-600">Schedule Donation History</h3>
+          {historyDonations.length > 6 && (
+            <button
+              className="text-sm font-semibold text-red-600 hover:underline"
+              onClick={() => setShowAllDonHistory((v) => !v)}
+            >
+              {showAllDonHistory ? "Show less" : `Show all (${historyDonations.length})`}
+            </button>
+          )}
+        </div>
+        {historyDonations.length ? (
+          <ul className="space-y-2">
+            {(showAllDonHistory ? historyDonations : historyDonations.slice(0, 6)).map((d) =>
+              renderRow(d, "donation")
+            )}
+          </ul>
+        ) : (
+          <p className="text-sm text-gray-600">No past donations yet.</p>
+        )}
+      </div>
+
+      {/* NEW: Blood Request History */}
+      <div className="max-w-6xl mx-auto p-6 bg-white rounded-lg shadow mb-8">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-xl font-bold text-red-600">Blood Request History</h3>
+          {historyRequests.length > 6 && (
+            <button
+              className="text-sm font-semibold text-red-600 hover:underline"
+              onClick={() => setShowAllReqHistory((v) => !v)}
+            >
+              {showAllReqHistory ? "Show less" : `Show all (${historyRequests.length})`}
+            </button>
+          )}
+        </div>
+        {historyRequests.length ? (
+          <ul className="space-y-2">
+            {(showAllReqHistory ? historyRequests : historyRequests.slice(0, 6)).map((r) =>
+              renderRow(r, "request")
+            )}
+          </ul>
+        ) : (
+          <p className="text-sm text-gray-600">No past blood requests yet.</p>
+        )}
+      </div>
+
       {/* Urgent Alerts Manager */}
       <div id="alerts" className="max-w-6xl mx-auto p-6">
         <AlertManager bankId={id} bankName={bloodBank?.name} />
@@ -425,7 +568,7 @@ export default function BloodBankEditForm() {
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-white p-6 rounded-lg shadow-lg w-full max-w-md">
             <h3 className="text-xl font-bold mb-4 text-red-600">
-              {modalType === "donation" ? "Donation Request Details" : "Blood Request Details"}
+              {modalType === "donation" ? "Donation Details" : "Blood Request Details"}
             </h3>
             <div className="space-y-2 max-h-80 overflow-auto">
               {Object.entries(selectedItem).map(([k, v]) => (
@@ -438,34 +581,6 @@ export default function BloodBankEditForm() {
               ))}
             </div>
             <div className="flex justify-end mt-4 gap-2">
-              {(!selectedItem.status || (selectedItem.status || "").toLowerCase() === "pending") && (
-                <>
-                  <button
-                    className="bg-green-600 text-white px-3 py-1 rounded hover:bg-green-700"
-                    onClick={() =>
-                      handleRequestAction(
-                        modalType === "donation" ? "donation_schedules" : "blood_requests",
-                        selectedItem,
-                        "approved"
-                      )
-                    }
-                  >
-                    Approve
-                  </button>
-                  <button
-                    className="bg-red-600 text-white px-3 py-1 rounded hover:bg-red-700"
-                    onClick={() =>
-                      handleRequestAction(
-                        modalType === "donation" ? "donation_schedules" : "blood_requests",
-                        selectedItem,
-                        "rejected"
-                      )
-                    }
-                  >
-                    Reject
-                  </button>
-                </>
-              )}
               <button
                 className="bg-gray-500 text-white px-3 py-1 rounded hover:bg-gray-600"
                 onClick={() => setSelectedItem(null)}
@@ -479,3 +594,10 @@ export default function BloodBankEditForm() {
     </div>
   );
 }
+
+/* CSS tip: in your global CSS, add:
+
+@keyframes card-shake { 0%{transform:translateX(0)} 25%{transform:translateX(-3px)} 50%{transform:translateX(3px)} 75%{transform:translateX(-3px)} 100%{transform:translateX(0)} }
+.animate-shake { animation: card-shake 0.35s ease-in-out 2; }
+
+*/
