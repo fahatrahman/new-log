@@ -15,25 +15,21 @@ import { db, auth } from "./firebase";
 import bannerImage from "../ban.jpg";
 import { Users, Droplet, Building2 } from "lucide-react";
 import { Link } from "react-router-dom";
-import FindBloodBank from "./FindBloodBank"; // ⬅️ reuse the component
+import FindBloodBank from "./FindBloodBank";
 
 export default function Home() {
-  // --- Eligibility banner ---
   const [showEligibilityBanner, setShowEligibilityBanner] = useState(false);
   const [checkingEligibility, setCheckingEligibility] = useState(true);
 
-  // --- Alerts ---
   const [alerts, setAlerts] = useState([]);
 
-  // --- Impact stats ---
+  // --- Stats ---
   const [donorCount, setDonorCount] = useState(0);
   const [banksCount, setBanksCount] = useState(0);
   const [unitsDelivered30d, setUnitsDelivered30d] = useState(0);
 
-  // --- Upcoming drives ---
   const [drives, setDrives] = useState([]);
 
-  // --- Small facts carousel ---
   const facts = useMemo(
     () => [
       "You can donate whole blood every 90 days.",
@@ -47,7 +43,6 @@ export default function Home() {
   const factTimer = useRef(null);
 
   useEffect(() => {
-    // Rotate facts every 5s
     factTimer.current = setInterval(
       () => setFactIdx((i) => (i + 1) % facts.length),
       5000
@@ -55,28 +50,25 @@ export default function Home() {
     return () => clearInterval(factTimer.current);
   }, [facts.length]);
 
-  // Count blood banks (for the stats tile)
+  // Blood bank count
   useEffect(() => {
     (async () => {
       try {
         const snap = await getDocs(collection(db, "BloodBanks"));
-        setBanksCount(snap.size || snap.docs.length);
+        setBanksCount(snap.size);
       } catch (err) {
         console.error("Error counting blood banks:", err);
       }
     })();
   }, []);
 
-  // Load alerts + eligibility prompt for signed-in users
+  // Eligibility + alerts
   useEffect(() => {
     const unsub = auth.onAuthStateChanged(async (u) => {
       if (!u) {
         setShowEligibilityBanner(false);
         setCheckingEligibility(false);
-        const qAll = query(
-          collection(db, "alerts"),
-          where("active", "==", true)
-        );
+        const qAll = query(collection(db, "alerts"), where("active", "==", true));
         const all = await getDocs(qAll);
         setAlerts(all.docs.map((d) => ({ id: d.id, ...d.data() })));
         return;
@@ -89,11 +81,7 @@ export default function Home() {
           const passed = data?.eligibility?.passed;
           setShowEligibilityBanner(passed !== true);
 
-          // Show alerts (prefer city/group match)
-          const activeQ = query(
-            collection(db, "alerts"),
-            where("active", "==", true)
-          );
+          const activeQ = query(collection(db, "alerts"), where("active", "==", true));
           const snap = await getDocs(activeQ);
           const all = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
           const preferred = all.filter(
@@ -115,40 +103,23 @@ export default function Home() {
     return () => unsub();
   }, []);
 
-  // Load impact stats & upcoming drives
+  // Stats + drives
   useEffect(() => {
     (async () => {
       try {
-        // Donors (users with role=user; fallback: all Users)
+        // Donors
         const usersSnap = await getDocs(collection(db, "Users"));
         const donors = usersSnap.docs.filter(
           (d) => (d.data().role || "user") === "user"
         );
         setDonorCount(donors.length);
 
-        // Units delivered in last 30 days (approved requests)
+        // Units delivered in last 30 days
         const start30 = new Date();
         start30.setDate(start30.getDate() - 30);
-        const ts30 = Timestamp.fromDate(start30);
 
-        let reqQ = query(
-          collection(db, "blood_requests"),
-          orderBy("timestamp", "desc"),
-          where("timestamp", ">=", ts30),
-          limit(500)
-        );
-        let reqSnap = await getDocs(reqQ);
-        let reqRows = reqSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
-
-        if (reqRows.length === 0) {
-          const reqFallback = query(
-            collection(db, "blood_requests"),
-            orderBy("timestamp", "desc"),
-            limit(500)
-          );
-          reqSnap = await getDocs(reqFallback);
-          reqRows = reqSnap.docs.map((d) => ({ id: d.id, ...d.data() })); 
-        }
+        const reqSnap = await getDocs(collection(db, "blood_requests"));
+        const reqRows = reqSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
 
         const dateFromDoc = (r) => {
           const raw = r?.date || r?.timestamp;
@@ -170,16 +141,11 @@ export default function Home() {
         }, 0);
         setUnitsDelivered30d(units);
 
-        // Upcoming drives (next 3 scheduled donations by date)
-        const now = new Date();
-        const donQ = query(
-          collection(db, "donation_schedules"),
-          orderBy("timestamp", "desc"),
-          limit(400)
-        );
-        const donSnap = await getDocs(donQ);
+        // Upcoming drives
+        const donSnap = await getDocs(collection(db, "donation_schedules"));
         const rows = donSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
 
+        const now = new Date();
         const parsed = rows
           .map((d) => {
             let dateVal = null;
@@ -220,7 +186,7 @@ export default function Home() {
 
   return (
     <div className="min-h-screen flex flex-col">
-      {/* HERO with overlay */}
+      {/* HERO */}
       <div className="relative h-[22rem] md:h-[26rem] w-full overflow-hidden">
         <img
           src={bannerImage}
@@ -233,33 +199,23 @@ export default function Home() {
             Save Lives Today
           </h1>
           <p className="mt-2 text-sm md:text-base text-white/90 max-w-xl">
-            Request blood when you need it, or schedule a donation with nearby
-            blood banks. Every drop matters.
+            Request blood when you need it, or schedule a donation with nearby blood banks. Every drop matters.
           </p>
           <div className="mt-4 flex gap-2">
-            <Link
-              to="/request-blood"
-              className="bg-white text-red-600 font-semibold px-4 py-2 rounded-md shadow hover:bg-red-50"
-            >
+            <Link to="/request-blood" className="bg-white text-red-600 font-semibold px-4 py-2 rounded-md shadow hover:bg-red-50">
               Request Blood
             </Link>
-            <Link
-              to="/schedule-donation"
-              className="bg-red-600/90 text-white font-semibold px-4 py-2 rounded-md shadow hover:bg-red-700"
-            >
+            <Link to="/schedule-donation" className="bg-red-600/90 text-white font-semibold px-4 py-2 rounded-md shadow hover:bg-red-700">
               Become a Donor
             </Link>
-            <a
-              href="#find"
-              className="bg-white/10 text-white font-semibold px-4 py-2 rounded-md border border-white/30 hover:bg-white/20"
-            >
+            <a href="#find" className="bg-white/10 text-white font-semibold px-4 py-2 rounded-md border border-white/30 hover:bg-white/20">
               Find Blood Bank
             </a>
           </div>
         </div>
       </div>
 
-      {/* QUICK IMPACT STRIP */}
+      {/* STATS STRIP */}
       <div className="max-w-5xl mx-auto w-full px-4 mt-8">
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-5 flex items-center gap-4">
@@ -301,21 +257,14 @@ export default function Home() {
             <div>
               <p className="font-semibold">Complete your Donor Eligibility</p>
               <p className="text-sm">
-                Before scheduling a donation, please complete the quick
-                eligibility checklist.
+                Before scheduling a donation, please complete the quick eligibility checklist.
               </p>
             </div>
             <div className="flex shrink-0 gap-2">
-              <Link
-                to="/eligibility"
-                className="px-3 py-2 rounded bg-red-600 text-white text-sm font-semibold hover:bg-red-700"
-              >
+              <Link to="/eligibility" className="px-3 py-2 rounded bg-red-600 text-white text-sm font-semibold hover:bg-red-700">
                 Check now
               </Link>
-              <button
-                onClick={() => setShowEligibilityBanner(false)}
-                className="px-3 py-2 rounded border border-yellow-300 text-yellow-900 text-sm hover:bg-yellow-100"
-              >
+              <button onClick={() => setShowEligibilityBanner(false)} className="px-3 py-2 rounded border border-yellow-300 text-yellow-900 text-sm hover:bg-yellow-100">
                 Dismiss
               </button>
             </div>
@@ -323,7 +272,7 @@ export default function Home() {
         </div>
       )}
 
-      {/* URGENT ALERTS */}
+      {/* ALERTS */}
       {alerts.length > 0 && (
         <div className="max-w-5xl mx-auto px-4 w-full mt-6">
           <h2 className="text-xl font-semibold mb-3">Urgent Alerts Near You</h2>
@@ -331,11 +280,7 @@ export default function Home() {
             {alerts.slice(0, 6).map((a) => (
               <div key={a.id} className="rounded border p-3 bg-white shadow-sm">
                 <div className="flex items-center gap-2">
-                  <span
-                    className={`px-2 py-0.5 rounded text-xs font-semibold ${sevClass(
-                      a.severity
-                    )}`}
-                  >
+                  <span className={`px-2 py-0.5 rounded text-xs font-semibold ${sevClass(a.severity)}`}>
                     {a.severity?.toUpperCase() || "ALERT"}
                   </span>
                   <span className="font-bold">{a.bloodGroup}</span>
@@ -343,9 +288,7 @@ export default function Home() {
                 </div>
                 <p className="text-sm mt-1">{a.message}</p>
                 {a.bankName && (
-                  <p className="text-xs text-gray-500 mt-1">
-                    Posted by: {a.bankName}
-                  </p>
+                  <p className="text-xs text-gray-500 mt-1">Posted by: {a.bankName}</p>
                 )}
               </div>
             ))}
@@ -353,31 +296,22 @@ export default function Home() {
         </div>
       )}
 
-      {/* FIND BLOOD BANK (reused component) */}
+      {/* FIND BLOOD BANK */}
       <div id="find" className="max-w-5xl mx-auto px-4 w-full mt-8">
         <FindBloodBank />
       </div>
 
-      {/* UPCOMING DRIVES */}
+      {/* DRIVES */}
       {drives.length > 0 && (
         <div className="max-w-5xl mx-auto px-4 w-full mt-10">
           <h2 className="text-xl font-semibold mb-3">Upcoming Blood Drives</h2>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
             {drives.map((d) => (
               <div key={d.id} className="bg-white rounded-xl border border-gray-200 p-4 shadow-sm">
-                <div className="text-sm font-semibold">
-                  {d.bankName || "Blood Bank"}
-                </div>
-                <div className="text-xs text-gray-500">
-                  {d._when?.toLocaleString() || "TBA"}
-                </div>
-                {d.city && (
-                  <div className="text-xs text-gray-500">City: {d.city}</div>
-                )}
-                <Link
-                  to="/schedule-donation"
-                  className="mt-3 inline-block text-sm bg-red-600 text-white px-3 py-1.5 rounded-md hover:bg-red-700"
-                >
+                <div className="text-sm font-semibold">{d.bankName || "Blood Bank"}</div>
+                <div className="text-xs text-gray-500">{d._when?.toLocaleString() || "TBA"}</div>
+                {d.city && <div className="text-xs text-gray-500">City: {d.city}</div>}
+                <Link to="/schedule-donation" className="mt-3 inline-block text-sm bg-red-600 text-white px-3 py-1.5 rounded-md hover:bg-red-700">
                   Join / Schedule
                 </Link>
               </div>
@@ -386,24 +320,18 @@ export default function Home() {
         </div>
       )}
 
-      {/* FACTS CAROUSEL */}
+      {/* FACTS */}
       <div className="max-w-5xl mx-auto px-4 w-full mt-10 mb-12">
         <div className="bg-white rounded-xl border border-gray-200 p-4 shadow-sm flex items-center justify-between">
           <div className="flex items-center gap-2">
             <div className="text-2xl">💡</div>
             <div className="text-sm md:text-base">
-              <span className="font-semibold">Did you know?</span>{" "}
-              {facts[factIdx]}
+              <span className="font-semibold">Did you know?</span> {facts[factIdx]}
             </div>
           </div>
           <div className="hidden md:flex gap-1">
             {facts.map((_, i) => (
-              <span
-                key={i}
-                className={`h-2 w-2 rounded-full ${
-                  i === factIdx ? "bg-red-600" : "bg-gray-300"
-                }`}
-              />
+              <span key={i} className={`h-2 w-2 rounded-full ${i === factIdx ? "bg-red-600" : "bg-gray-300"}`} />
             ))}
           </div>
         </div>
