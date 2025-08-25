@@ -11,6 +11,7 @@ export default function Register() {
     name: "",
     email: "",
     password: "",
+    role: "user", // default role
   });
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
@@ -29,20 +30,35 @@ export default function Register() {
         form.password
       );
 
-      // Optional profile displayName
       if (form.name.trim()) {
         await updateProfile(user, { displayName: form.name.trim() });
       }
 
-      // Create user doc (your app expects Users collection)
+      // Save to Users collection
       await setDoc(doc(db, "Users", user.uid), {
         name: form.name.trim() || "",
         email: form.email.trim(),
-        role: "user",
+        role: form.role,
         createdAt: new Date().toISOString(),
       });
 
-      navigate("/home");
+      // If registering as bloodbank, also create BloodBank doc
+      if (form.role === "bloodbank") {
+        await setDoc(doc(db, "BloodBanks", user.uid), {
+          name: form.name.trim() || "Blood Bank",
+          email: form.email.trim(),
+          address: "",
+          bloodStock: {},
+          createdAt: new Date().toISOString(),
+        });
+      }
+
+      // redirect based on role
+      if (form.role === "bloodbank") {
+        navigate(`/bloodbank/edit/${user.uid}`);
+      } else {
+        navigate("/home");
+      }
     } catch (e) {
       setErr(e.message || "Registration failed");
     } finally {
@@ -70,7 +86,8 @@ export default function Register() {
               name="name"
               value={form.name}
               onChange={onChange}
-              placeholder="Your name"
+              placeholder="Your name / Blood bank name"
+              required
             />
           </div>
 
@@ -98,6 +115,19 @@ export default function Register() {
               placeholder="Minimum 6 characters"
               required
             />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium mb-1">Register as</label>
+            <select
+              name="role"
+              value={form.role}
+              onChange={onChange}
+              className="input w-full"
+            >
+              <option value="user">User</option>
+              <option value="bloodbank">Blood Bank</option>
+            </select>
           </div>
 
           <button
