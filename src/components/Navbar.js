@@ -29,10 +29,12 @@ export default function Navbar() {
 
   const item =
     "w-full text-left px-4 py-2.5 rounded-md hover:bg-red-50 active:bg-red-100 transition font-medium";
-  const section = "px-4 pt-3 pb-1 text-xs uppercase tracking-wide text-gray-400";
+  const section =
+    "px-4 pt-3 pb-1 text-xs uppercase tracking-wide text-gray-400";
 
   return (
     <>
+      {/* Top Nav */}
       <nav className="bg-red-600 text-white sticky top-0 z-50 flex justify-between items-center px-4 md:px-6 py-3 font-sans shadow-md">
         <span
           className="cursor-pointer select-none text-xl font-bold"
@@ -54,10 +56,16 @@ export default function Navbar() {
         </div>
       </nav>
 
+      {/* Dimmed overlay when sidebar open */}
       {open && (
-        <div className="fixed inset-0 bg-black/40 z-[60]" onClick={() => setOpen(false)} aria-hidden="true" />
+        <div
+          className="fixed inset-0 bg-black/40 z-[60]"
+          onClick={() => setOpen(false)}
+          aria-hidden="true"
+        />
       )}
 
+      {/* Sidebar */}
       <aside
         className={`fixed top-0 right-0 h-full w-80 max-w-[90vw] bg-white z-[70] shadow-2xl transform transition-transform ${
           open ? "translate-x-0" : "translate-x-full"
@@ -66,17 +74,29 @@ export default function Navbar() {
         aria-modal="true"
         aria-label="Main menu"
       >
+        {/* Header */}
         <div className="flex items-center justify-between px-4 py-4 border-b">
           <div className="flex items-center gap-3">
-            <div className="h-10 w-10 rounded-full bg-red-600 text-white flex items-center justify-center font-bold">AR</div>
+            <div className="h-10 w-10 rounded-full bg-red-600 text-white flex items-center justify-center font-bold">
+              AR
+            </div>
             <div className="leading-tight">
               <div className="font-semibold">Amar Rokto</div>
-              <div className="text-xs text-gray-500 capitalize">{user ? role || "user" : "guest"}</div>
+              <div className="text-xs text-gray-500 capitalize">
+                {user ? role || "user" : "guest"}
+              </div>
             </div>
           </div>
-          <button aria-label="Close menu" onClick={() => setOpen(false)} className="rounded-md px-2 py-1 hover:bg-gray-100">✕</button>
+          <button
+            aria-label="Close menu"
+            onClick={() => setOpen(false)}
+            className="rounded-md px-2 py-1 hover:bg-gray-100"
+          >
+            ✕
+          </button>
         </div>
 
+        {/* Menu Items */}
         <div className="py-2">
           {user && role === "user" && (
             <>
@@ -121,13 +141,16 @@ export default function Navbar() {
 
           <hr className="my-3" />
 
-          {user ? (
+          {user && (
             <div className="px-4 pb-3">
-              <button onClick={handleLogout} className="w-full text-left px-4 py-2.5 rounded-md bg-red-600 text-white hover:bg-red-700 transition font-semibold shadow-sm">
+              <button
+                onClick={handleLogout}
+                className="w-full text-left px-4 py-2.5 rounded-md bg-red-600 text-white hover:bg-red-700 transition font-semibold shadow-sm"
+              >
                 Logout
               </button>
             </div>
-          ) : null}
+          )}
         </div>
 
         <div className="px-4 py-3 border-t text-xs text-gray-500">

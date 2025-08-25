@@ -1,38 +1,58 @@
 // src/components/FindBloodBank.js
-import React, { useEffect, useState } from 'react';
-import { collection, getDocs } from 'firebase/firestore';
-import { db } from './firebase'; // adjust path if needed
-import { useNavigate } from 'react-router-dom';
+import React, { useEffect, useMemo, useState } from "react";
+import { collection, getDocs } from "firebase/firestore";
+import { db } from "./firebase";
+import { useNavigate } from "react-router-dom";
 
-const FindBloodBank = () => {
+export default function FindBloodBank() {
   const [bloodBanks, setBloodBanks] = useState([]);
-  const [search, setSearch] = useState('');
-  const [filter, setFilter] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState("");
+  const [search, setSearch] = useState("");
+  const [filter, setFilter] = useState("");
   const navigate = useNavigate();
 
-  // Fetch data from Firestore
   useEffect(() => {
-    const fetchBloodBanks = async () => {
+    (async () => {
       try {
-        const querySnapshot = await getDocs(collection(db, 'BloodBanks'));
-        const data = querySnapshot.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data()
-        }));
-        setBloodBanks(data);
-      } catch (error) {
-        console.error('Error fetching blood banks:', error);
+        const snap = await getDocs(collection(db, "BloodBanks"));
+        const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        setBloodBanks(rows);
+      } catch (e) {
+        console.error("Error fetching blood banks:", e);
+        setErr("Could not load blood banks.");
+      } finally {
+        setLoading(false);
       }
-    };
-    fetchBloodBanks();
+    })();
   }, []);
 
-  // Filter results
-  const filteredBloodBanks = bloodBanks.filter(bank => {
-    const matchesSearch = bank.name.toLowerCase().includes(search.toLowerCase());
-    const matchesFilter = filter ? bank.bloodGroups?.includes(filter) : true;
-    return matchesSearch && matchesFilter;
-  });
+  // Normalize once
+  const q = search.trim().toLowerCase();
+  const filtered = useMemo(() => {
+    return bloodBanks.filter((bank) => {
+      const name = (bank.name || "").toLowerCase();
+      const address =
+        (bank.address || bank.location || bank.city || "").toLowerCase();
+
+      // handle bloodGroups as array or string; compare case‑insensitively
+      const groups = Array.isArray(bank.bloodGroups)
+        ? bank.bloodGroups.map((g) => String(g).toUpperCase())
+        : String(bank.bloodGroups || "").toUpperCase();
+
+      const matchesSearch = !q || name.includes(q) || address.includes(q);
+      const matchesFilter = !filter
+        ? true
+        : Array.isArray(groups)
+        ? groups.includes(filter.toUpperCase())
+        : groups.includes(filter.toUpperCase());
+
+      return matchesSearch && matchesFilter;
+    });
+  }, [bloodBanks, q, filter]);
+
+  if (loading) return <div className="p-4">Loading blood banks…</div>;
+  if (err) return <div className="p-4 text-red-600">{err}</div>;
 
   return (
     <div className="p-4">
@@ -41,7 +61,7 @@ const FindBloodBank = () => {
       {/* Search bar */}
       <input
         type="text"
-        placeholder="Search by name..."
+        placeholder="Search by name or address…"
         value={search}
         onChange={(e) => setSearch(e.target.value)}
         className="border p-2 rounded w-full mb-3"
@@ -65,20 +85,27 @@ const FindBloodBank = () => {
       </select>
 
       {/* List of results */}
-      <ul className="space-y-3">
-        {filteredBloodBanks.map((bank) => (
-          <li
-            key={bank.id}
-            onClick={() => navigate(`/bloodbank/${bank.id}`)}
-            className="p-3 border rounded cursor-pointer hover:bg-gray-100"
-          >
-            <h2 className="font-semibold">{bank.name}</h2>
-            <p className="text-sm text-gray-600">{bank.location}</p>
-          </li>
-        ))}
-      </ul>
+      {filtered.length === 0 ? (
+        <div className="text-sm text-gray-600">No matching blood banks.</div>
+      ) : (
+        <ul className="space-y-3">
+          {filtered.map((bank) => (
+            <li
+              key={bank.id}
+              onClick={() => navigate(`/bloodbank/${bank.id}`)}
+              className="p-3 border rounded cursor-pointer hover:bg-gray-100"
+            >
+              <h2 className="font-semibold">{bank.name || "Blood Bank"}</h2>
+              <p className="text-sm text-gray-600">
+                {bank.address || bank.location || bank.city || "Location N/A"}
+              </p>
+              {bank.contact && (
+                <p className="text-xs text-gray-500 mt-1">📞 {bank.contact}</p>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
-};
-
-export default FindBloodBank;
+}
