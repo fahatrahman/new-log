@@ -14,14 +14,10 @@ import {
 import { db, auth } from "./firebase";
 import bannerImage from "../ban.jpg";
 import { Users, Droplet, Building2 } from "lucide-react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
+import FindBloodBank from "./FindBloodBank"; // ⬅️ reuse the component
 
 export default function Home() {
-  // --- Search ---
-  const [searchTerm, setSearchTerm] = useState("");
-  const [bloodBanks, setBloodBanks] = useState([]);
-  const [filteredBanks, setFilteredBanks] = useState([]);
-
   // --- Eligibility banner ---
   const [showEligibilityBanner, setShowEligibilityBanner] = useState(false);
   const [checkingEligibility, setCheckingEligibility] = useState(true);
@@ -37,7 +33,7 @@ export default function Home() {
   // --- Upcoming drives ---
   const [drives, setDrives] = useState([]);
 
-  // --- Facts carousel ---
+  // --- Small facts carousel ---
   const facts = useMemo(
     () => [
       "You can donate whole blood every 90 days.",
@@ -50,10 +46,8 @@ export default function Home() {
   const [factIdx, setFactIdx] = useState(0);
   const factTimer = useRef(null);
 
-  const navigate = useNavigate();
-
-  // Rotate facts
   useEffect(() => {
+    // Rotate facts every 5s
     factTimer.current = setInterval(
       () => setFactIdx((i) => (i + 1) % facts.length),
       5000
@@ -61,26 +55,17 @@ export default function Home() {
     return () => clearInterval(factTimer.current);
   }, [facts.length]);
 
-  // Load blood banks list (for search + count)
+  // Count blood banks (for the stats tile)
   useEffect(() => {
     (async () => {
       try {
         const snap = await getDocs(collection(db, "BloodBanks"));
-        const banks = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-        setBloodBanks(banks);
-        setBanksCount(banks.length);
-        // ✅ show all by default
-        setFilteredBanks(banks);
+        setBanksCount(snap.size || snap.docs.length);
       } catch (err) {
-        console.error("Error fetching blood banks:", err);
+        console.error("Error counting blood banks:", err);
       }
     })();
   }, []);
-
-  // Keep filtered list in sync if data loads after mount
-  useEffect(() => {
-    if (!searchTerm.trim()) setFilteredBanks(bloodBanks);
-  }, [bloodBanks, searchTerm]);
 
   // Load alerts + eligibility prompt for signed-in users
   useEffect(() => {
@@ -88,11 +73,12 @@ export default function Home() {
       if (!u) {
         setShowEligibilityBanner(false);
         setCheckingEligibility(false);
-        try {
-          const qAll = query(collection(db, "alerts"), where("active", "==", true));
-          const all = await getDocs(qAll);
-          setAlerts(all.docs.map((d) => ({ id: d.id, ...d.data() })));
-        } catch {}
+        const qAll = query(
+          collection(db, "alerts"),
+          where("active", "==", true)
+        );
+        const all = await getDocs(qAll);
+        setAlerts(all.docs.map((d) => ({ id: d.id, ...d.data() })));
         return;
       }
 
@@ -103,12 +89,17 @@ export default function Home() {
           const passed = data?.eligibility?.passed;
           setShowEligibilityBanner(passed !== true);
 
-          const activeQ = query(collection(db, "alerts"), where("active", "==", true));
+          // Show alerts (prefer city/group match)
+          const activeQ = query(
+            collection(db, "alerts"),
+            where("active", "==", true)
+          );
           const snap = await getDocs(activeQ);
           const all = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
           const preferred = all.filter(
             (a) =>
-              (!data.city || a.city?.toLowerCase() === data.city?.toLowerCase()) &&
+              (!data.city ||
+                a.city?.toLowerCase() === data.city?.toLowerCase()) &&
               (!data.bloodGroup || a.bloodGroup === data.bloodGroup)
           );
           setAlerts(preferred.length ? preferred : all);
@@ -128,12 +119,14 @@ export default function Home() {
   useEffect(() => {
     (async () => {
       try {
+        // Donors (users with role=user; fallback: all Users)
         const usersSnap = await getDocs(collection(db, "Users"));
         const donors = usersSnap.docs.filter(
           (d) => (d.data().role || "user") === "user"
         );
         setDonorCount(donors.length);
 
+        // Units delivered in last 30 days (approved requests)
         const start30 = new Date();
         start30.setDate(start30.getDate() - 30);
         const ts30 = Timestamp.fromDate(start30);
@@ -154,7 +147,7 @@ export default function Home() {
             limit(500)
           );
           reqSnap = await getDocs(reqFallback);
-          reqRows = reqSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+          reqRows = reqSnap.docs.map((d) => ({ id: d.id, ...d.data() })); 
         }
 
         const dateFromDoc = (r) => {
@@ -177,10 +170,14 @@ export default function Home() {
         }, 0);
         setUnitsDelivered30d(units);
 
+        // Upcoming drives (next 3 scheduled donations by date)
         const now = new Date();
-        const donSnap = await getDocs(
-          query(collection(db, "donation_schedules"), orderBy("timestamp", "desc"), limit(400))
+        const donQ = query(
+          collection(db, "donation_schedules"),
+          orderBy("timestamp", "desc"),
+          limit(400)
         );
+        const donSnap = await getDocs(donQ);
         const rows = donSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
 
         const parsed = rows
@@ -212,26 +209,6 @@ export default function Home() {
     })();
   }, []);
 
-  // --- Search handler ---
-  const handleSearchChange = (e) => {
-    const value = e.target.value;
-    setSearchTerm(value);
-
-    const v = value.trim().toLowerCase();
-    if (!v) {
-      // ✅ when empty, show full list
-      setFilteredBanks(bloodBanks);
-      return;
-    }
-
-    const filtered = bloodBanks.filter((bank) => {
-      const name = (bank.name || "").toLowerCase();
-      const address = (bank.address || bank.location || bank.city || "").toLowerCase();
-      return name.includes(v) || address.includes(v);
-    });
-    setFilteredBanks(filtered);
-  };
-
   const sevClass = (s) =>
     s === "emergency"
       ? "bg-red-700 text-white"
@@ -243,7 +220,7 @@ export default function Home() {
 
   return (
     <div className="min-h-screen flex flex-col">
-      {/* HERO */}
+      {/* HERO with overlay */}
       <div className="relative h-[22rem] md:h-[26rem] w-full overflow-hidden">
         <img
           src={bannerImage}
@@ -252,7 +229,9 @@ export default function Home() {
         />
         <div className="absolute inset-0 bg-black/40" />
         <div className="relative z-10 max-w-5xl mx-auto h-full px-4 flex flex-col items-start justify-center text-white">
-          <h1 className="text-3xl md:text-4xl font-bold leading-tight">Save Lives Today</h1>
+          <h1 className="text-3xl md:text-4xl font-bold leading-tight">
+            Save Lives Today
+          </h1>
           <p className="mt-2 text-sm md:text-base text-white/90 max-w-xl">
             Request blood when you need it, or schedule a donation with nearby
             blood banks. Every drop matters.
@@ -292,6 +271,7 @@ export default function Home() {
               <div className="text-2xl font-bold mt-0.5">{donorCount}</div>
             </div>
           </div>
+
           <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-5 flex items-center gap-4">
             <div className="bg-red-100 text-red-600 rounded-full h-12 w-12 flex items-center justify-center">
               <Droplet className="w-6 h-6" />
@@ -301,6 +281,7 @@ export default function Home() {
               <div className="text-2xl font-bold mt-0.5">{unitsDelivered30d}</div>
             </div>
           </div>
+
           <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-5 flex items-center gap-4">
             <div className="bg-red-100 text-red-600 rounded-full h-12 w-12 flex items-center justify-center">
               <Building2 className="w-6 h-6" />
@@ -350,48 +331,31 @@ export default function Home() {
             {alerts.slice(0, 6).map((a) => (
               <div key={a.id} className="rounded border p-3 bg-white shadow-sm">
                 <div className="flex items-center gap-2">
-                  <span className={`px-2 py-0.5 rounded text-xs font-semibold ${sevClass(a.severity)}`}>
+                  <span
+                    className={`px-2 py-0.5 rounded text-xs font-semibold ${sevClass(
+                      a.severity
+                    )}`}
+                  >
                     {a.severity?.toUpperCase() || "ALERT"}
                   </span>
                   <span className="font-bold">{a.bloodGroup}</span>
                   <span className="text-gray-600 text-sm">· {a.city}</span>
                 </div>
                 <p className="text-sm mt-1">{a.message}</p>
-                {a.bankName && <p className="text-xs text-gray-500 mt-1">Posted by: {a.bankName}</p>}
+                {a.bankName && (
+                  <p className="text-xs text-gray-500 mt-1">
+                    Posted by: {a.bankName}
+                  </p>
+                )}
               </div>
             ))}
           </div>
         </div>
       )}
 
-      {/* FIND BLOOD BANK */}
-      <div id="find" className="max-w-xl mx-auto px-4 text-center mt-8">
-        <h2 className="text-red-600 text-3xl font-semibold mb-4">Find Nearest Blood Bank</h2>
-        <input
-          type="text"
-          placeholder="Search blood banks by name or address"
-          value={searchTerm}
-          onChange={handleSearchChange}
-          className="input"
-        />
-        {filteredBanks.length > 0 ? (
-          <ul className="max-h-72 overflow-y-auto text-left bg-white border border-gray-300 rounded-md shadow-md mt-4">
-            {filteredBanks.map((bank) => (
-              <li
-                key={bank.id}
-                className="px-4 py-3 border-b last:border-b-0 cursor-pointer hover:bg-red-50 transition"
-                onClick={() => navigate(`/bloodbank/${bank.id}`)}
-              >
-                <strong className="block">{bank.name}</strong>
-                <span className="text-sm text-gray-600">
-                  {(bank.address || bank.location || bank.city) ?? "Location N/A"}
-                </span>
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <div className="text-sm text-gray-500 mt-3">No matching blood banks.</div>
-        )}
+      {/* FIND BLOOD BANK (reused component) */}
+      <div id="find" className="max-w-5xl mx-auto px-4 w-full mt-8">
+        <FindBloodBank />
       </div>
 
       {/* UPCOMING DRIVES */}
@@ -401,10 +365,19 @@ export default function Home() {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
             {drives.map((d) => (
               <div key={d.id} className="bg-white rounded-xl border border-gray-200 p-4 shadow-sm">
-                <div className="text-sm font-semibold">{d.bankName || "Blood Bank"}</div>
-                <div className="text-xs text-gray-500">{d._when?.toLocaleString() || "TBA"}</div>
-                {d.city && <div className="text-xs text-gray-500">City: {d.city}</div>}
-                <Link to="/schedule-donation" className="mt-3 inline-block text-sm bg-red-600 text-white px-3 py-1.5 rounded-md hover:bg-red-700">
+                <div className="text-sm font-semibold">
+                  {d.bankName || "Blood Bank"}
+                </div>
+                <div className="text-xs text-gray-500">
+                  {d._when?.toLocaleString() || "TBA"}
+                </div>
+                {d.city && (
+                  <div className="text-xs text-gray-500">City: {d.city}</div>
+                )}
+                <Link
+                  to="/schedule-donation"
+                  className="mt-3 inline-block text-sm bg-red-600 text-white px-3 py-1.5 rounded-md hover:bg-red-700"
+                >
                   Join / Schedule
                 </Link>
               </div>
@@ -412,6 +385,29 @@ export default function Home() {
           </div>
         </div>
       )}
+
+      {/* FACTS CAROUSEL */}
+      <div className="max-w-5xl mx-auto px-4 w-full mt-10 mb-12">
+        <div className="bg-white rounded-xl border border-gray-200 p-4 shadow-sm flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <div className="text-2xl">💡</div>
+            <div className="text-sm md:text-base">
+              <span className="font-semibold">Did you know?</span>{" "}
+              {facts[factIdx]}
+            </div>
+          </div>
+          <div className="hidden md:flex gap-1">
+            {facts.map((_, i) => (
+              <span
+                key={i}
+                className={`h-2 w-2 rounded-full ${
+                  i === factIdx ? "bg-red-600" : "bg-gray-300"
+                }`}
+              />
+            ))}
+          </div>
+        </div>
+      </div>
 
       <footer className="bg-gray-900 text-gray-300 text-center py-4 mt-auto text-sm">
         &copy; {new Date().getFullYear()} Amar Rokto. All rights reserved.
