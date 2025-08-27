@@ -1,8 +1,10 @@
+// src/components/login.js (or Login.js)
 import React, { useState } from "react";
 import { signInWithEmailAndPassword } from "firebase/auth";
 import { auth, db } from "./firebase";
 import { doc, getDoc } from "firebase/firestore";
 import { Link, useNavigate } from "react-router-dom";
+import logo from "../logo.png"; // ✅ your PNG in /src
 
 export default function Login() {
   const navigate = useNavigate();
@@ -19,7 +21,7 @@ export default function Login() {
       const cred = await signInWithEmailAndPassword(auth, email.trim(), password);
       const { uid } = cred.user;
 
-      // Old behavior: if this uid has a BloodBanks doc, go straight to editor
+      // If this uid has a BloodBanks doc, go straight to editor; else go home
       const bbSnap = await getDoc(doc(db, "BloodBanks", uid));
       if (bbSnap.exists()) {
         navigate(`/bloodbank/edit/${uid}`);
@@ -36,7 +38,16 @@ export default function Login() {
   return (
     <div className="min-h-screen flex items-center justify-center px-4">
       <div className="w-full max-w-md bg-white rounded-xl shadow p-6">
-        <h1 className="text-2xl font-bold text-red-600 mb-4">Login</h1>
+        {/* ✅ Logo */}
+        <div className="flex items-center justify-center mb-3">
+          <img
+            src={logo}
+            alt="Amar Rokto"
+            className="h-16 w-16 rounded-full object-contain shadow-sm"
+          />
+        </div>
+
+        <h1 className="text-2xl font-bold text-red-600 mb-4 text-center">Login</h1>
 
         {err && (
           <div className="mb-3 text-sm text-red-700 bg-red-100 border border-red-200 rounded p-2">
