@@ -1,12 +1,13 @@
 // src/components/login.js
 import React, { useState } from "react";
-import { signInWithEmailAndPassword } from "firebase/auth";
+import { signInWithEmailAndPassword, GoogleAuthProvider, signInWithPopup } from "firebase/auth";
 import { auth, db } from "./firebase";
 import { doc, getDoc } from "firebase/firestore";
 import { Link, useNavigate } from "react-router-dom";
+import brandLogo from "../logo.png"; // your logo in /src
 
-// Left-side hero image (place your file at: /src/login.png)
-import heroImg from "../login.png";
+// left-side hero image lives in /public
+const heroImg = process.env.PUBLIC_URL + "/login.jpg";
 
 export default function Login() {
   const navigate = useNavigate();
@@ -16,19 +17,9 @@ export default function Login() {
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
 
-  const onSubmit = async (e) => {
-    e.preventDefault();
-    setErr("");
-    setLoading(true);
+  // common redirect after any successful auth:
+  const redirectAfterAuth = async (uid) => {
     try {
-      const cred = await signInWithEmailAndPassword(
-        auth,
-        email.trim(),
-        password
-      );
-      const { uid } = cred.user;
-
-      // ✔ keep existing behavior: if a bank doc exists, go to editor; else go home
       const bbSnap = await getDoc(doc(db, "BloodBanks", uid));
       if (bbSnap.exists()) {
         navigate(`/bloodbank/edit/${uid}`);
@@ -36,7 +27,38 @@ export default function Login() {
         navigate("/home");
       }
     } catch (e) {
+      // if something goes wrong, at least take them home
+      console.error("Post-login redirect error:", e);
+      navigate("/home");
+    }
+  };
+
+  const onSubmit = async (e) => {
+    e.preventDefault();
+    setErr("");
+    setLoading(true);
+    try {
+      const cred = await signInWithEmailAndPassword(auth, email.trim(), password);
+      await redirectAfterAuth(cred.user.uid);
+    } catch (e) {
       setErr(e?.message || "Login failed");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const onGoogleSignIn = async () => {
+    setErr("");
+    setLoading(true);
+    try {
+      const provider = new GoogleAuthProvider();
+      const result = await signInWithPopup(auth, provider);
+      await redirectAfterAuth(result.user.uid);
+    } catch (e) {
+      // user-closed popup or real error
+      if (e?.code !== "auth/popup-closed-by-user") {
+        setErr(e?.message || "Google sign-in failed");
+      }
     } finally {
       setLoading(false);
     }
@@ -55,17 +77,18 @@ export default function Login() {
               className="absolute inset-0 w-full h-full object-cover"
             />
             <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent" />
-            <div className="absolute top-4 right-4">
-              <button
-                type="button"
-                onClick={() => navigate("/")}
-                className="px-3 py-1.5 rounded-full text-xs font-medium bg-white/20 hover:bg-white/30 backdrop-blur border border-white/30"
-              >
-                Back to website →
-              </button>
+
+            {/* Brand logo (top-left) */}
+            <div className="absolute top-4 left-4 flex items-center gap-2">
+              <img
+                src={brandLogo}
+                alt="Amar Rokto"
+                className="h-8 w-8 md:h-10 md:w-10 rounded-full bg-white/90 p-1 shadow"
+              />
+              <span className="hidden md:inline text-sm font-semibold">Amar Rokto</span>
             </div>
 
-            {/* Caption near bottom-left (like the reference) */}
+            {/* Caption near bottom-left */}
             <div className="absolute left-6 right-6 bottom-8">
               <h3 className="text-lg md:text-xl font-semibold">
                 Capturing Moments,
@@ -81,10 +104,17 @@ export default function Login() {
 
           {/* Right: form panel */}
           <div className="px-6 md:px-10 py-8 md:py-10">
-            <h1 className="text-3xl md:text-4xl font-semibold">
-              Welcome back
-            </h1>
-            <p className="mt-2 text-sm text-white/70">
+            {/* Brand logo above form heading */}
+            <div className="flex items-center justify-center mb-3">
+              <img
+                src={brandLogo}
+                alt="Amar Rokto"
+                className="h-10 w-10 rounded-full bg-white p-1 shadow"
+              />
+            </div>
+
+            <h1 className="text-3xl md:text-4xl font-semibold text-center">Welcome back</h1>
+            <p className="mt-2 text-sm text-white/70 text-center">
               Don’t have an account?{" "}
               <Link to="/register" className="text-violet-400 hover:underline">
                 Register
@@ -111,9 +141,7 @@ export default function Login() {
               </div>
 
               <div>
-                <label className="block text-xs mb-1 text-white/70">
-                  Password
-                </label>
+                <label className="block text-xs mb-1 text-white/70">Password</label>
                 <div className="relative">
                   <input
                     type={showPw ? "text" : "password"}
@@ -168,7 +196,7 @@ export default function Login() {
               </button>
             </form>
 
-            {/* Optional: social row (non-functional visual only) */}
+            {/* Single social button: Google only */}
             <div className="mt-6">
               <div className="relative text-center">
                 <span className="px-2 text-xs text-white/60 bg-[#1f1c2b] relative z-10">
@@ -176,18 +204,15 @@ export default function Login() {
                 </span>
                 <div className="absolute left-0 right-0 top-1/2 -translate-y-1/2 h-px bg-white/10" />
               </div>
-              <div className="mt-4 grid grid-cols-2 gap-3">
+              <div className="mt-4">
                 <button
                   type="button"
-                  className="rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 py-2.5 text-sm"
+                  onClick={onGoogleSignIn}
+                  disabled={loading}
+                  className="w-full rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 py-2.5 text-sm disabled:opacity-60"
+                  title="Sign in with Google"
                 >
                   Google
-                </button>
-                <button
-                  type="button"
-                  className="rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 py-2.5 text-sm"
-                >
-                  Apple
                 </button>
               </div>
             </div>
