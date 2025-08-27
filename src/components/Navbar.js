@@ -8,6 +8,8 @@ import { doc, getDoc, collection, query, where, getDocs } from "firebase/firesto
 import NotificationBell from "./NotificationBell";
 import logo from "../logo.png"; // your PNG logo sitting in /src
 
+const EDIT_PATH = (id) => `/bloodbank/${id}/edit`;
+
 export default function Navbar() {
   const navigate = useNavigate();
   const { user, role } = useAuth(); // expects { user, role }, where user?.uid exists when logged in
