@@ -3,7 +3,7 @@ import React, { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { signOut } from "firebase/auth";
 import { auth, db } from "./firebase";
-import { useAuth } from "./AuthContext";
+import { useAuth } from "../contexts/AuthContext";
 import { doc, getDoc, collection, query, where, getDocs } from "firebase/firestore";
 import NotificationBell from "./NotificationBell";
 import logo from "../logo.png"; // your PNG logo sitting in /src
