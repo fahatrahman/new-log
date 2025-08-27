@@ -16,6 +16,47 @@ import { db } from "./firebase";
 import { getAuth, signOut } from "firebase/auth";
 import AlertManager from "./AlertManager";
 
+/* ---------- Collapsible card (arrow + smooth height) ---------- */
+function CollapsibleCard({ title, badge, open, onToggle, children }) {
+  return (
+    <div className="ui-card bg-white p-0">
+      <button
+        type="button"
+        onClick={onToggle}
+        className="w-full flex items-center justify-between px-5 py-4"
+      >
+        <div className="flex items-center gap-3">
+          <h3 className="ui-section-title">{title}</h3>
+          {typeof badge === "number" && (
+            <span className="text-xs font-semibold px-2 py-0.5 rounded bg-rose-100 text-rose-700">
+              {badge}
+            </span>
+          )}
+        </div>
+        <svg
+          className={`h-5 w-5 text-gray-500 transition-transform ${open ? "rotate-180" : ""}`}
+          viewBox="0 0 20 20"
+          fill="currentColor"
+        >
+          <path
+            fillRule="evenodd"
+            d="M5.23 7.21a.75.75 0 011.06.02L10 10.94l3.71-3.71a.75.75 0 111.06 1.06l-4.24 4.24a.75.75 0 01-1.06 0L5.21 8.29a.75.75 0 01.02-1.08z"
+            clipRule="evenodd"
+          />
+        </svg>
+      </button>
+
+      <div
+        className={`overflow-hidden transition-all duration-300 ease-in-out ${
+          open ? "max-h-[1200px] opacity-100" : "max-h-0 opacity-0"
+        }`}
+      >
+        <div className="px-5 pb-5">{children}</div>
+      </div>
+    </div>
+  );
+}
+
 export default function BloodBankEditForm() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -47,6 +88,10 @@ export default function BloodBankEditForm() {
     lowStockThreshold: 5,
     bannerUrl: "",
   });
+
+  // NEW: collapsible toggles (default closed)
+  const [openPendingDon, setOpenPendingDon] = useState(false);
+  const [openPendingReq, setOpenPendingReq] = useState(false);
 
   const auth = getAuth();
 
@@ -432,7 +477,7 @@ export default function BloodBankEditForm() {
           )}
         </div>
         <button
-          className="ui-btn ui-info"
+          className="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 border border-blue-700 rounded"
           onClick={() => {
             setSelectedItem(item);
             setModalType(type === "donation" ? "donation" : "request");
@@ -446,11 +491,11 @@ export default function BloodBankEditForm() {
 
   return (
     <div className="min-h-screen bg-gray-50/60">
-      {/* UI helpers + NEW heading font */}
+      {/* UI helpers + button shape + title font */}
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@600;700&display=swap');
         .ui-card{background:#fff;border-radius:14px;border:1px solid rgba(0,0,0,.06);box-shadow:0 8px 28px rgba(0,0,0,.06)}
-        .ui-btn{display:inline-flex;align-items:center;gap:.5rem;border-radius:10px;padding:.6rem 1rem;font-weight:700;font-size:.875rem;line-height:1;transition:transform .06s ease,box-shadow .2s ease}
+        .ui-btn{display:inline-flex;align-items:center;gap:.5rem;border-radius:6px;padding:.6rem 1rem;font-weight:700;font-size:.875rem;line-height:1;transition:transform .06s ease,box-shadow .2s ease}
         .ui-btn:active{transform:translateY(1px)}
         .ui-primary{background:#dc2626;color:#fff} .ui-primary:hover{background:#b91c1c}
         .ui-soft{background:#f3f4f6;color:#111827} .ui-soft:hover{background:#e5e7eb}
@@ -460,18 +505,13 @@ export default function BloodBankEditForm() {
         .ui-info{background:#2563eb;color:#fff} .ui-info:hover{background:#1d4ed8}
         @keyframes card-shake{0%{transform:translateX(0)}25%{transform:translateX(-3px)}50%{transform:translateX(3px)}75%{transform:translateX(-3px)}100%{transform:translateX(0)}}
         .animate-shake{animation:card-shake .35s ease-in-out 2}
-
-        /* Section titles: bigger + new font */
         .ui-section-title{
           font-family:'Poppins', system-ui, -apple-system, Segoe UI, Roboto, 'Helvetica Neue', Arial, 'Noto Sans', 'Apple Color Emoji','Segoe UI Emoji';
-          font-size:1.25rem;        /* text-xl */
-          line-height:1.35;
-          font-weight:700;
-          letter-spacing:.2px;
+          font-size:1.25rem; line-height:1.35; font-weight:700; letter-spacing:.2px;
         }
       `}</style>
 
-      {/* Header */}
+      {/* Header (unchanged features) */}
       <div
         className="relative text-white"
         style={{
@@ -520,7 +560,7 @@ export default function BloodBankEditForm() {
       <div className="max-w-6xl mx-auto p-4 grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Left column */}
         <div className="lg:col-span-2 space-y-6">
-          {/* Inventory */}
+          {/* Inventory (unchanged) */}
           <div className="ui-card p-5 bg-white">
             <div className="flex items-center justify-between mb-4">
               <h2 className="ui-section-title">Blood Inventory</h2>
@@ -573,20 +613,20 @@ export default function BloodBankEditForm() {
             </div>
           </div>
 
-          {/* Pending queues */}
+          {/* Pending queues wrapped in collapsibles (features unchanged) */}
           <div className="grid md:grid-cols-2 gap-6">
-            <div className="ui-card p-5 bg-rose-50 border-rose-100">
-              <h3 className="ui-section-title text-red-600">
-                Pending Donation Requests
-              </h3>
-              <div className="mt-3 space-y-2">
+            <CollapsibleCard
+              title="Pending Donation Requests"
+              badge={pendingDonations.length}
+              open={openPendingDon}
+              onToggle={() => setOpenPendingDon((v) => !v)}
+            >
+              <div className="space-y-2">
                 {pendingDonations.length ? (
                   pendingDonations.map((don) => (
                     <div
                       key={don.id}
-                      className={`flex items-center justify-between gap-3 p-3 rounded-lg ${statusClass(
-                        don.status
-                      )}`}
+                      className={`items-center gap-3 p-3 rounded-lg ${statusClass(don.status)}`}
                     >
                       <div className="text-sm">
                         <span className="font-medium">
@@ -594,7 +634,7 @@ export default function BloodBankEditForm() {
                         </span>{" "}
                         – {don.bloodGroup || "N/A"} – {toDateString(don.date)}
                       </div>
-                      <div className="shrink-0 flex gap-2">
+                      <div className="mt-4 shrink-0 flex gap-2">
                         {(!don.status ||
                           (don.status || "").toLowerCase() === "pending") && (
                           <>
@@ -640,18 +680,20 @@ export default function BloodBankEditForm() {
                   <p className="text-sm text-gray-600">No donation requests.</p>
                 )}
               </div>
-            </div>
+            </CollapsibleCard>
 
-            <div className="ui-card p-5 bg-white">
-              <h3 className="ui-section-title text-red-600">
-                Pending Blood Requests
-              </h3>
-              <div className="mt-3 space-y-2">
+            <CollapsibleCard
+              title="Pending Blood Requests"
+              badge={pendingRequests.length}
+              open={openPendingReq}
+              onToggle={() => setOpenPendingReq((v) => !v)}
+            >
+              <div className="space-y-2">
                 {pendingRequests.length ? (
                   pendingRequests.map((req) => (
                     <div
                       key={req.id}
-                      className={`flex items-center justify-between gap-3 p-3 rounded-lg ${statusClass(
+                      className={` p-3 rounded-lg ${statusClass(
                         req.status
                       )}`}
                     >
@@ -662,18 +704,14 @@ export default function BloodBankEditForm() {
                         – {req.bloodGroup || "N/A"} – {req.units || 0} unit(s) –{" "}
                         {toDateString(req.date)}
                       </div>
-                      <div className="shrink-0 flex gap-2">
+                      <div className="mt-4 shrink-0 flex gap-2">
                         {(!req.status ||
                           (req.status || "").toLowerCase() === "pending") && (
                           <>
                             <button
                               className="ui-btn ui-success"
                               onClick={() =>
-                                handleRequestAction(
-                                  "blood_requests",
-                                  req,
-                                  "approved"
-                                )
+                                handleRequestAction("blood_requests", req, "approved")
                               }
                             >
                               Approve
@@ -681,11 +719,7 @@ export default function BloodBankEditForm() {
                             <button
                               className="ui-btn ui-danger"
                               onClick={() =>
-                                handleRequestAction(
-                                  "blood_requests",
-                                  req,
-                                  "rejected"
-                                )
+                                handleRequestAction("blood_requests", req, "rejected")
                               }
                             >
                               Reject
@@ -708,11 +742,11 @@ export default function BloodBankEditForm() {
                   <p className="text-sm text-gray-600">No blood requests.</p>
                 )}
               </div>
-            </div>
+            </CollapsibleCard>
           </div>
         </div>
 
-        {/* Right column */}
+        {/* Right column (unchanged) */}
         <div className="space-y-6">
           <div className="ui-card p-5 bg-white max-h-[420px] overflow-auto">
             <div className="flex items-center justify-between">
@@ -762,7 +796,7 @@ export default function BloodBankEditForm() {
         </div>
       </div>
 
-      {/* Alerts */}
+      {/* Alerts (unchanged) */}
       <div id="alerts" className="max-w-6xl mx-auto p-4">
         <div className="ui-card p-5 bg-white">
           <h3 className="ui-section-title mb-3">Urgent Alerts</h3>
@@ -770,7 +804,7 @@ export default function BloodBankEditForm() {
         </div>
       </div>
 
-      {/* Details Modal */}
+      {/* Details Modal (unchanged) */}
       {selectedItem && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
           <div className="ui-card w-full max-w-md p-5">
@@ -796,7 +830,7 @@ export default function BloodBankEditForm() {
         </div>
       )}
 
-      {/* Edit Profile Modal */}
+      {/* Edit Profile Modal (unchanged) */}
       {showEdit && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="ui-card w-full max-w-lg p-5 bg-white">
