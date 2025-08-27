@@ -1,83 +1,143 @@
-import React, { useEffect, useState } from 'react';
-import { collection, getDocs } from 'firebase/firestore';
-import { db } from './firebase'; // adjust path if needed
-import { useNavigate } from 'react-router-dom';
+// src/components/FindBloodBank.js
+import React, { useEffect, useMemo, useState } from "react";
+import {
+  collection,
+  query,
+  where,
+  orderBy,
+  limit,
+  getDocs,
+} from "firebase/firestore";
+import { db } from "./firebase";
 
-const FindBloodBank = () => {
-  const [bloodBanks, setBloodBanks] = useState([]);
-  const [search, setSearch] = useState('');
-  const [filter, setFilter] = useState('');
-  const navigate = useNavigate();
+const MIN_QUERY_LEN = 2;
+const PAGE_LIMIT = 20;
 
-  // Fetch data from Firestore
+export default function FindBloodBank() {
+  const [qtext, setQtext] = useState("");
+  const [results, setResults] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState("");
+
+  // tiny debounce helper
+  const useDebounce = () => {
+    let t;
+    return (fn, ms = 300) => {
+      clearTimeout(t);
+      t = setTimeout(fn, ms);
+    };
+  };
+  const debounce = useMemo(useDebounce, []);
+
   useEffect(() => {
-    const fetchBloodBanks = async () => {
+    let cancelled = false;
+
+    const run = async () => {
+      setErr("");
+      // show nothing by default until user types at least 2 chars
+      if (qtext.trim().length < MIN_QUERY_LEN) {
+        setResults([]);
+        return;
+      }
+      setLoading(true);
+
+      await new Promise((r) => debounce(r, 300)); // 300ms debounce
+
       try {
-        const querySnapshot = await getDocs(collection(db, 'BloodBanks'));
-        const data = querySnapshot.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data()
-        }));
-        setBloodBanks(data);
-      } catch (error) {
-        console.error('Error fetching blood banks:', error);
+        // NOTE: collection name matches your DB exactly: "BloodBanks"
+        // Requires banks to store a lowercased token array: searchKeywords: string[]
+        const q = query(
+          collection(db, "BloodBanks"),
+          where("searchKeywords", "array-contains", qtext.toLowerCase()),
+          orderBy("name"),
+          limit(PAGE_LIMIT)
+        );
+        const snap = await getDocs(q);
+        if (cancelled) return;
+        setResults(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+      } catch (e) {
+        console.error(e);
+        setErr(
+          "Search failed. If Firestore asks for an index, click its link once to create it."
+        );
+      } finally {
+        if (!cancelled) setLoading(false);
       }
     };
-    fetchBloodBanks();
-  }, []);
 
-  // Filter results
-  const filteredBloodBanks = bloodBanks.filter(bank => {
-    const matchesSearch = bank.name.toLowerCase().includes(search.toLowerCase());
-    const matchesFilter = filter ? bank.bloodGroups?.includes(filter) : true;
-    return matchesSearch && matchesFilter;
-  });
+    run();
+    return () => {
+      cancelled = true;
+    };
+  }, [qtext, debounce]);
 
   return (
-    <div className="p-4">
-      <h1 className="text-2xl font-bold mb-4">Find Nearest Blood Bank</h1>
-
-      {/* Search bar */}
+    <div className="max-w-2xl mx-auto p-4">
+      <label className="block text-sm font-medium mb-1">Find Blood Bank</label>
       <input
-        type="text"
-        placeholder="Search by name..."
-        value={search}
-        onChange={(e) => setSearch(e.target.value)}
-        className="border p-2 rounded w-full mb-3"
+        value={qtext}
+        onChange={(e) => setQtext(e.target.value)}
+        className="w-full border rounded px-3 py-2"
+        placeholder='Type a bank name, city, or area (e.g., "Banani")'
       />
 
-      {/* Dropdown filter */}
-      <select
-        value={filter}
-        onChange={(e) => setFilter(e.target.value)}
-        className="border p-2 rounded w-full mb-4"
-      >
-        <option value="">Filter by Blood Group</option>
-        <option value="A+">A+</option>
-        <option value="A-">A-</option>
-        <option value="B+">B+</option>
-        <option value="B-">B-</option>
-        <option value="O+">O+</option>
-        <option value="O-">O-</option>
-        <option value="AB+">AB+</option>
-        <option value="AB-">AB-</option>
-      </select>
+      {/* empty state */}
+      {qtext.trim().length < MIN_QUERY_LEN && (
+        <p className="text-sm text-gray-600 mt-3">
+          Start typing to search blood banks…
+        </p>
+      )}
 
-      {/* List of results */}
-      <ul className="space-y-3">
-        {filteredBloodBanks.map((bank) => (
-          <li
-            key={bank.id}
-            onClick={() => navigate(`/bloodbank/${bank.id}`)}
-            className="p-3 border rounded cursor-pointer hover:bg-gray-100"
-          >
-            <h2 className="font-semibold">{bank.name}</h2>
-            <p className="text-sm text-gray-600">{bank.location}</p>
-          </li>
-        ))}
-      </ul>
+      {/* loading */}
+      {qtext.trim().length >= MIN_QUERY_LEN && loading && (
+        <p className="text-sm text-gray-600 mt-3">Searching…</p>
+      )}
+
+      {/* error */}
+      {err && <p className="text-sm text-red-600 mt-3">{err}</p>}
+
+      {/* results */}
+      {qtext.trim().length >= MIN_QUERY_LEN && !loading && !err && results.length === 0 && (
+        <p className="text-sm text-gray-600 mt-3">No matches found.</p>
+      )}
+
+      {results.length > 0 && (
+        <ul className="divide-y border rounded mt-3">
+          {results.map((b) => (
+            <li key={b.id} className="p-3">
+              <div className="font-medium">{b.name || "Unnamed Bank"}</div>
+              <div className="text-sm text-gray-600">
+                {(b.address || b.location || "")}
+                {b.city ? `, ${b.city}` : ""}
+              </div>
+              {b.contactNumber && (
+                <div className="text-sm text-gray-600">
+                  Phone: {b.contactNumber}
+                </div>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
-};
+}
 
-export default FindBloodBank;
+/*
+To power this search, ensure each BloodBanks doc has:
+
+const tokens = (s) =>
+  (s || "").toLowerCase().split(/[^a-z0-9]+/i).filter(Boolean);
+
+const searchKeywords = Array.from(new Set([
+  ...tokens(name),
+  ...tokens(city),
+  ...tokens(address),
+  ...tokens(location),
+  ...(Array.isArray(tags) ? tags.map(t => (t||"").toLowerCase()) : []),
+]));
+
+await setDoc(doc(db, "BloodBanks", uid), { searchKeywords }, { merge: true });
+
+Then the query above will work fast with array-contains.
+*/

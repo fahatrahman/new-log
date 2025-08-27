@@ -20,7 +20,7 @@ import AlertManager from "./AlertManager";
  * Blood bank inventory + moderation screen
  * - live stock editing (± per group)
  * - approve/reject donations & requests (with stock checks)
- * - in‑app notifications
+ * - in-app notifications
  * - urgent alerts manager
  * - Schedule Donation History + Blood Request History
  * - compatible with bloodGroup OR bloodGroups fields
@@ -73,6 +73,29 @@ export default function BloodBankEditForm() {
     }
   };
 
+  // ---------- helpers for search keywords (NEW) ----------
+  const tokenize = (s) =>
+    (s || "")
+      .toLowerCase()
+      .split(/[^a-z0-9]+/i)
+      .filter(Boolean);
+
+  const computeSearchKeywords = (bank) => {
+    const parts = [
+      ...tokenize(bank.name),
+      ...tokenize(bank.address || bank.location),
+      ...tokenize(bank.city),
+    ];
+    const groups = Array.isArray(bank.bloodGroups)
+      ? bank.bloodGroups
+      : Array.isArray(bank.bloodGroup)
+      ? bank.bloodGroup
+      : [];
+    groups.forEach((g) => parts.push(String(g).toLowerCase()));
+    return Array.from(new Set(parts));
+  };
+  // -------------------------------------------------------
+
   // Load bank + normalize stock to supported groups
   useEffect(() => {
     const ref = doc(db, "BloodBanks", id);
@@ -80,6 +103,25 @@ export default function BloodBankEditForm() {
       if (!snap.exists()) return;
       const data = snap.data();
       setBloodBank(data);
+
+      // ensure searchKeywords are present (NEW)
+      try {
+        const currentKW = Array.isArray(data.searchKeywords)
+          ? data.searchKeywords
+          : [];
+        const freshKW = computeSearchKeywords(data);
+        if (
+          freshKW.length &&
+          (currentKW.length === 0 ||
+            freshKW.join("|") !== currentKW.join("|"))
+        ) {
+          updateDoc(doc(db, "BloodBanks", id), {
+            searchKeywords: freshKW,
+          }).catch(() => {});
+        }
+      } catch {
+        /* no-op */
+      }
 
       const supported = Array.isArray(data.bloodGroup)
         ? data.bloodGroup
@@ -99,17 +141,27 @@ export default function BloodBankEditForm() {
   useEffect(() => {
     const col = collection(db, "donation_schedules");
 
-    const unsubA = onSnapshot(query(col, where("bloodBankId", "==", id)), (snapshot) => {
-      const list = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
-      const filtered = list.filter((x) => !x.status || x.status.toLowerCase() === "pending");
-      setPendingDonations((prev) => mergeUniqueById(prev, filtered));
-    });
+    const unsubA = onSnapshot(
+      query(col, where("bloodBankId", "==", id)),
+      (snapshot) => {
+        const list = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
+        const filtered = list.filter(
+            (x) => !x.status || x.status.toLowerCase() === "pending"
+        );
+        setPendingDonations((prev) => mergeUniqueById(prev, filtered));
+      }
+    );
 
-    const unsubB = onSnapshot(query(col, where("bankId", "==", id)), (snapshot) => {
-      const list = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
-      const filtered = list.filter((x) => !x.status || x.status.toLowerCase() === "pending");
-      setPendingDonations((prev) => mergeUniqueById(prev, filtered));
-    });
+    const unsubB = onSnapshot(
+      query(col, where("bankId", "==", id)),
+      (snapshot) => {
+        const list = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
+        const filtered = list.filter(
+            (x) => !x.status || x.status.toLowerCase() === "pending"
+        );
+        setPendingDonations((prev) => mergeUniqueById(prev, filtered));
+      }
+    );
 
     return () => {
       unsubA();
@@ -121,17 +173,27 @@ export default function BloodBankEditForm() {
   useEffect(() => {
     const col = collection(db, "blood_requests");
 
-    const unsubA = onSnapshot(query(col, where("bloodBankId", "==", id)), (snapshot) => {
-      const list = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
-      const filtered = list.filter((x) => !x.status || x.status.toLowerCase() === "pending");
-      setPendingRequests((prev) => mergeUniqueById(prev, filtered));
-    });
+    const unsubA = onSnapshot(
+      query(col, where("bloodBankId", "==", id)),
+      (snapshot) => {
+        const list = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
+        const filtered = list.filter(
+            (x) => !x.status || x.status.toLowerCase() === "pending"
+        );
+        setPendingRequests((prev) => mergeUniqueById(prev, filtered));
+      }
+    );
 
-    const unsubB = onSnapshot(query(col, where("bankId", "==", id)), (snapshot) => {
-      const list = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
-      const filtered = list.filter((x) => !x.status || x.status.toLowerCase() === "pending");
-      setPendingRequests((prev) => mergeUniqueById(prev, filtered));
-    });
+    const unsubB = onSnapshot(
+      query(col, where("bankId", "==", id)),
+      (snapshot) => {
+        const list = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
+        const filtered = list.filter(
+            (x) => !x.status || x.status.toLowerCase() === "pending"
+        );
+        setPendingRequests((prev) => mergeUniqueById(prev, filtered));
+      }
+    );
 
     return () => {
       unsubA();
@@ -144,7 +206,12 @@ export default function BloodBankEditForm() {
     const col = collection(db, "donation_schedules");
 
     const unsub1 = onSnapshot(
-      query(col, where("bloodBankId", "==", id), where("status", "in", ["approved", "rejected"]), orderBy("timestamp", "desc")),
+      query(
+        col,
+        where("bloodBankId", "==", id),
+        where("status", "in", ["approved", "rejected"]),
+        orderBy("timestamp", "desc")
+      ),
       (snap) => {
         const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
         setHistoryDonations((prev) => mergeReplace(prev, rows));
@@ -152,7 +219,12 @@ export default function BloodBankEditForm() {
     );
 
     const unsub2 = onSnapshot(
-      query(col, where("bankId", "==", id), where("status", "in", ["approved", "rejected"]), orderBy("timestamp", "desc")),
+      query(
+        col,
+        where("bankId", "==", id),
+        where("status", "in", ["approved", "rejected"]),
+        orderBy("timestamp", "desc")
+      ),
       (snap) => {
         const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
         setHistoryDonations((prev) => mergeReplace(prev, rows));
@@ -170,7 +242,12 @@ export default function BloodBankEditForm() {
     const col = collection(db, "blood_requests");
 
     const unsub1 = onSnapshot(
-      query(col, where("bloodBankId", "==", id), where("status", "in", ["approved", "rejected"]), orderBy("timestamp", "desc")),
+      query(
+        col,
+        where("bloodBankId", "==", id),
+        where("status", "in", ["approved", "rejected"]),
+        orderBy("timestamp", "desc")
+      ),
       (snap) => {
         const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
         setHistoryRequests((prev) => mergeReplace(prev, rows));
@@ -178,7 +255,12 @@ export default function BloodBankEditForm() {
     );
 
     const unsub2 = onSnapshot(
-      query(col, where("bankId", "==", id), where("status", "in", ["approved", "rejected"]), orderBy("timestamp", "desc")),
+      query(
+        col,
+        where("bankId", "==", id),
+        where("status", "in", ["approved", "rejected"]),
+        orderBy("timestamp", "desc")
+      ),
       (snap) => {
         const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
         setHistoryRequests((prev) => mergeReplace(prev, rows));
@@ -201,7 +283,9 @@ export default function BloodBankEditForm() {
     const map = new Map(a.map((x) => [x.id, x]));
     b.forEach((x) => map.set(x.id, x));
     // sort newest first by timestamp.seconds (fallback to 0)
-    return [...map.values()].sort((x, y) => (y?.timestamp?.seconds || 0) - (x?.timestamp?.seconds || 0));
+    return [...map.values()].sort(
+      (x, y) => (y?.timestamp?.seconds || 0) - (x?.timestamp?.seconds || 0)
+    );
   };
 
   const pushStock = async (updated) => {
@@ -226,7 +310,7 @@ export default function BloodBankEditForm() {
     pushStock(next);
   };
 
-  // in‑app notification
+  // in-app notification
   const createNotification = async ({ userId, kind, refId, status, message }) => {
     try {
       await addDoc(collection(db, "notifications"), {
@@ -267,6 +351,18 @@ export default function BloodBankEditForm() {
         const next = { ...bloodStock, [group]: have - need };
         setBloodStock(next);
         await pushStock(next);
+      }
+
+      // If approving a donation, increase stock for that blood group (NEW)
+      if (colName === "donation_schedules" && newStatus === "approved") {
+        const addUnits = Number(item.units || 1); // default to 1 if not provided
+        const group = item.bloodGroup;
+        if (group) {
+          const have = Number(bloodStock[group] || 0);
+          const next = { ...bloodStock, [group]: have + addUnits };
+          setBloodStock(next);
+          await pushStock(next);
+        }
       }
 
       // Update status
@@ -348,7 +444,9 @@ export default function BloodBankEditForm() {
             <div className="text-gray-700">
               {item.date ? toDateString(item.date) : item.time ? item.time : ""}
             </div>
-            {item.notes && <div className="text-gray-600">Notes: {item.notes}</div>}
+            {(item.notes || item.additionalInfo) && ( // show additionalInfo too (NEW)
+              <div className="text-gray-600">Notes: {item.notes || item.additionalInfo}</div>
+            )}
           </div>
           <button
             className="shrink-0 h-8 px-3 rounded bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold"
@@ -465,13 +563,17 @@ export default function BloodBankEditForm() {
                     <>
                       <button
                         className="bg-green-600 text-white px-3 py-1 rounded hover:bg-green-700"
-                        onClick={() => handleRequestAction("donation_schedules", don, "approved")}
+                        onClick={() =>
+                          handleRequestAction("donation_schedules", don, "approved")
+                        }
                       >
                         Approve
                       </button>
                       <button
                         className="bg-red-600 text-white px-3 py-1 rounded hover:bg-red-700"
-                        onClick={() => handleRequestAction("donation_schedules", don, "rejected")}
+                        onClick={() =>
+                          handleRequestAction("donation_schedules", don, "rejected")
+                        }
                       >
                         Reject
                       </button>

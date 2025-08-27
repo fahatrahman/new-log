@@ -1,7 +1,14 @@
 // src/components/HomeInsights.js
 import React, { useEffect, useMemo, useState } from "react";
 import {
-  collection, getDocs, orderBy, query, where, limit, Timestamp,
+  collection,
+  getDocs,
+  getCountFromServer,
+  orderBy,
+  query,
+  where,
+  limit,
+  Timestamp,
 } from "firebase/firestore";
 import { db } from "./firebase";
 import {
@@ -9,31 +16,42 @@ import {
   BarChart, Bar,
 } from "recharts";
 
-// Adjust to change chart height
 const CHART_HEIGHT = 220;
 
 const fmtDateKey = (d) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 
-function dateFromDoc(d) {
-  const raw = d?.date || d?.timestamp;
-  if (!raw) return null;
-  if (typeof raw === "string") {
-    const p = new Date(raw);
-    return isNaN(p.getTime()) ? null : p;
+const addDays = (base, delta) => {
+  const d = new Date(base);
+  d.setDate(d.getDate() + delta);
+  return d;
+};
+
+// Parse date from docs that may store either string date OR Timestamp fields
+const extractDate = (docData) => {
+  // prefer explicit timestamp field (your schema has it)
+  if (docData?.timestamp?.seconds) return new Date(docData.timestamp.seconds * 1000);
+  // fallback to string date: "2025-08-24" etc.
+  if (typeof docData?.date === "string") {
+    const d = new Date(docData.date);
+    if (!isNaN(d.getTime())) return d;
   }
-  if (raw?.seconds) return new Date(raw.seconds * 1000);
   return null;
-}
-const addDays = (base, delta) => { const d = new Date(base); d.setDate(d.getDate() + delta); return d; };
+};
 
 export default function HomeInsights() {
   const [loading, setLoading] = useState(true);
   const [reqs, setReqs] = useState([]);
   const [dons, setDons] = useState([]);
   const [donorCount, setDonorCount] = useState(0);
+  const [banksCount, setBanksCount] = useState(0);
+  const [unitsDelivered30d, setUnitsDelivered30d] = useState(0);
 
-  const today = useMemo(() => { const d = new Date(); d.setHours(0,0,0,0); return d; }, []);
+  const today = useMemo(() => {
+    const d = new Date();
+    d.setHours(0, 0, 0, 0);
+    return d;
+  }, []);
   const start14 = addDays(today, -13);
   const start30 = addDays(today, -29);
 
@@ -42,42 +60,51 @@ export default function HomeInsights() {
       try {
         const ts30 = Timestamp.fromDate(start30);
 
-        // requests (last 30d; fallback if no timestamp filter matches)
+        // -------- Counts --------
+
+        // Donors = Users with role === "user" (your current setup)
+        // If some documents miss role, you can count all Users instead.
+        const donorsQ = query(collection(db, "Users"), where("role", "==", "user"));
+        const donorsCountSnap = await getCountFromServer(donorsQ);
+        setDonorCount(donorsCountSnap.data().count);
+
+        // Blood banks = count of docs in BloodBanks
+        const banksCountSnap = await getCountFromServer(collection(db, "BloodBanks"));
+        setBanksCount(banksCountSnap.data().count);
+
+        // Approved requests in last 30 days (for charts + units)
         let qReq = query(
           collection(db, "blood_requests"),
-          orderBy("timestamp", "desc"),
+          where("status", "==", "approved"),
           where("timestamp", ">=", ts30),
-          limit(400)
+          orderBy("timestamp", "desc"),
+          limit(500)
         );
         let reqSnap = await getDocs(qReq);
         let reqRows = reqSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
-        if (reqRows.length === 0) {
-          const qReqFallback = query(collection(db, "blood_requests"), orderBy("timestamp", "desc"), limit(400));
-          reqSnap = await getDocs(qReqFallback);
-          reqRows = reqSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
-        }
-        setReqs(reqRows);
 
-        // donations (last 30d; fallback)
+        // Donation schedules (we chart approved donations per day too)
         let qDon = query(
           collection(db, "donation_schedules"),
-          orderBy("timestamp", "desc"),
           where("timestamp", ">=", ts30),
-          limit(400)
+          orderBy("timestamp", "desc"),
+          limit(500)
         );
         let donSnap = await getDocs(qDon);
         let donRows = donSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
-        if (donRows.length === 0) {
-          const qDonFallback = query(collection(db, "donation_schedules"), orderBy("timestamp", "desc"), limit(400));
-          donSnap = await getDocs(qDonFallback);
-          donRows = donSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
-        }
+
+        setReqs(reqRows);
         setDons(donRows);
 
-        // donors (count Users with role=user; fallback to all Users)
-        const usersSnap = await getDocs(collection(db, "Users"));
-        const donors = usersSnap.docs.filter((d) => (d.data().role || "user") === "user");
-        setDonorCount(donors.length);
+        // Units delivered in 30d = sum of units for approved requests in range
+        const delivered = reqRows.reduce((sum, r) => {
+          const approved = (r.status || "").toLowerCase() === "approved";
+          const dt = extractDate(r);
+          if (!approved || !dt || dt < start30) return sum;
+          const units = Number(r.units || 0);
+          return sum + (isNaN(units) ? 0 : units);
+        }, 0);
+        setUnitsDelivered30d(delivered);
       } catch (e) {
         console.error("Insights load error:", e);
       } finally {
@@ -86,26 +113,31 @@ export default function HomeInsights() {
     })();
   }, [start30]);
 
-  // per-day aggregation (14d)
+  // ---------- Build chart data ----------
+
+  // Per-day buckets for last 14 days
   const dayKeys = Array.from({ length: 14 }, (_, i) => fmtDateKey(addDays(start14, i)));
   const perDay = dayKeys.map((k) => ({ date: k, Requests: 0, Donations: 0 }));
 
   for (const r of reqs) {
-    const d = dateFromDoc(r); if (!d) continue;
-    const row = perDay.find((x) => x.date === fmtDateKey(d));
+    const dt = extractDate(r);
+    if (!dt) continue;
+    const row = perDay.find((x) => x.date === fmtDateKey(dt));
     if (row) row.Requests += 1;
   }
+
   for (const d of dons) {
-    const dt = dateFromDoc(d); if (!dt) continue;
+    const dt = extractDate(d);
+    if (!dt) continue;
     const row = perDay.find((x) => x.date === fmtDateKey(dt));
     const approved = (d.status || "pending").toLowerCase() === "approved";
     if (row && approved) row.Donations += 1;
   }
 
-  // group counts (30d)
+  // Most requested blood groups (30d)
   const groupCount = {};
   for (const r of reqs) {
-    const dt = dateFromDoc(r);
+    const dt = extractDate(r);
     if (!dt || dt < start30) continue;
     const g = r.bloodGroup || "N/A";
     groupCount[g] = (groupCount[g] || 0) + 1;
@@ -115,29 +147,25 @@ export default function HomeInsights() {
     .sort((a, b) => b.count - a.count)
     .slice(0, 8);
 
-  // units delivered (approved requests in 30d)
-  const totalUnitsDelivered = reqs.reduce((sum, r) => {
-    const approved = (r.status || "pending").toLowerCase() === "approved";
-    const dt = dateFromDoc(r);
-    if (!approved || !dt || dt < start30) return sum;
-    const units = Number(r.units || 0);
-    return sum + (isNaN(units) ? 0 : units);
-  }, 0);
-
   return (
     <section className="max-w-5xl mx-auto w-full">
       <h2 className="text-lg font-semibold mb-3">Community Insights</h2>
 
       {/* KPIs */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
         <div className="bg-white rounded-xl border border-gray-200 p-4 shadow-sm">
-          <div className="text-xs text-gray-500">Total Donors</div>
+          <div className="text-xs text-gray-500">Registered Donors</div>
           <div className="text-2xl font-bold mt-0.5">{loading ? "…" : donorCount}</div>
-          <div className="text-[11px] text-gray-400 mt-1">All registered users</div>
+          <div className="text-[11px] text-gray-400 mt-1">Users with role "user"</div>
+        </div>
+        <div className="bg-white rounded-xl border border-gray-200 p-4 shadow-sm">
+          <div className="text-xs text-gray-500">Blood Banks</div>
+          <div className="text-2xl font-bold mt-0.5">{loading ? "…" : banksCount}</div>
+          <div className="text-[11px] text-gray-400 mt-1">Docs in BloodBanks</div>
         </div>
         <div className="bg-white rounded-xl border border-gray-200 p-4 shadow-sm">
           <div className="text-xs text-gray-500">Units Delivered (30d)</div>
-          <div className="text-2xl font-bold mt-0.5">{loading ? "…" : totalUnitsDelivered}</div>
+          <div className="text-2xl font-bold mt-0.5">{loading ? "…" : unitsDelivered30d}</div>
           <div className="text-[11px] text-gray-400 mt-1">Approved blood requests</div>
         </div>
       </div>
