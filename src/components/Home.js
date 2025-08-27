@@ -8,7 +8,7 @@ import {
   query,
   where,
   orderBy,
-  limit,
+  getCountFromServer,
   Timestamp,
 } from "firebase/firestore";
 import { db, auth } from "./firebase";
@@ -54,8 +54,8 @@ export default function Home() {
   useEffect(() => {
     (async () => {
       try {
-        const snap = await getDocs(collection(db, "BloodBanks"));
-        setBanksCount(snap.size);
+        const snap = await getCountFromServer(collection(db, "BloodBanks"));
+        setBanksCount(snap.data().count);
       } catch (err) {
         console.error("Error counting blood banks:", err);
       }
@@ -107,19 +107,43 @@ export default function Home() {
   useEffect(() => {
     (async () => {
       try {
-        // Donors
-        const usersSnap = await getDocs(collection(db, "Users"));
-        const donors = usersSnap.docs.filter(
-          (d) => (d.data().role || "user") === "user"
-        );
-        setDonorCount(donors.length);
+        // Donors (count role in ["user","donor"])
+        try {
+          const donorsQ = query(
+            collection(db, "Users"),
+            where("role", "in", ["user", "donor"])
+          );
+          const donorsCountSnap = await getCountFromServer(donorsQ);
+          setDonorCount(donorsCountSnap.data().count);
+        } catch (e) {
+          // Fallback: read all and filter client-side (in case rules block the query)
+          console.warn("Donor count query failed, falling back to scan:", e);
+          const usersSnap = await getDocs(collection(db, "Users"));
+          const donors = usersSnap.docs.filter(
+            (d) => (d.data().role || "user") === "user" || d.data().role === "donor"
+          );
+          setDonorCount(donors.length);
+        }
 
         // Units delivered in last 30 days
         const start30 = new Date();
         start30.setDate(start30.getDate() - 30);
 
-        const reqSnap = await getDocs(collection(db, "blood_requests"));
-        const reqRows = reqSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        let reqRows = [];
+        try {
+          // Prefer time-bounded query on 'timestamp' (cheap, no composite index)
+          const reqQ = query(
+            collection(db, "blood_requests"),
+            where("timestamp", ">=", Timestamp.fromDate(start30)),
+            orderBy("timestamp", "desc")
+          );
+          const boundedSnap = await getDocs(reqQ);
+          reqRows = boundedSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        } catch (e) {
+          console.warn("Timestamp-bounded requests query failed, scanning all:", e);
+          const reqSnapAll = await getDocs(collection(db, "blood_requests"));
+          reqRows = reqSnapAll.docs.map((d) => ({ id: d.id, ...d.data() }));
+        }
 
         const dateFromDoc = (r) => {
           const raw = r?.date || r?.timestamp;
