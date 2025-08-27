@@ -7,8 +7,8 @@ import {
   getDoc,
   query,
   where,
-  orderBy,
   getCountFromServer,
+  orderBy,
   Timestamp,
 } from "firebase/firestore";
 import { db, auth } from "./firebase";
@@ -20,10 +20,9 @@ import FindBloodBank from "./FindBloodBank";
 export default function Home() {
   const [showEligibilityBanner, setShowEligibilityBanner] = useState(false);
   const [checkingEligibility, setCheckingEligibility] = useState(true);
-
   const [alerts, setAlerts] = useState([]);
 
-  // --- Stats ---
+  // KPIs
   const [donorCount, setDonorCount] = useState(0);
   const [banksCount, setBanksCount] = useState(0);
   const [unitsDelivered30d, setUnitsDelivered30d] = useState(0);
@@ -50,27 +49,48 @@ export default function Home() {
     return () => clearInterval(factTimer.current);
   }, [facts.length]);
 
-  // Blood bank count
+  // --- PUBLIC COUNTS (shows even when logged out) ---
   useEffect(() => {
     (async () => {
       try {
-        const snap = await getCountFromServer(collection(db, "BloodBanks"));
-        setBanksCount(snap.data().count);
+        const snap = await getDoc(doc(db, "stats", "global"));
+        if (snap.exists()) {
+          const data = snap.data() || {};
+          if (typeof data.donorsCount === "number") setDonorCount(data.donorsCount);
+          if (typeof data.unitsDelivered30d === "number")
+            setUnitsDelivered30d(data.unitsDelivered30d);
+        }
+      } catch (e) {
+        console.warn("stats/global read failed:", e);
+      }
+    })();
+  }, []);
+
+  // Blood bank count (works publicly)
+  useEffect(() => {
+    (async () => {
+      try {
+        const cnt = await getCountFromServer(collection(db, "BloodBanks"));
+        setBanksCount(cnt.data().count);
       } catch (err) {
         console.error("Error counting blood banks:", err);
       }
     })();
   }, []);
 
-  // Eligibility + alerts
+  // Eligibility + alerts (unchanged)
   useEffect(() => {
     const unsub = auth.onAuthStateChanged(async (u) => {
       if (!u) {
         setShowEligibilityBanner(false);
         setCheckingEligibility(false);
-        const qAll = query(collection(db, "alerts"), where("active", "==", true));
-        const all = await getDocs(qAll);
-        setAlerts(all.docs.map((d) => ({ id: d.id, ...d.data() })));
+        try {
+          const qAll = query(collection(db, "alerts"), where("active", "==", true));
+          const all = await getDocs(qAll);
+          setAlerts(all.docs.map((d) => ({ id: d.id, ...d.data() })));
+        } catch (e) {
+          console.warn("alerts read failed (probably rules):", e);
+        }
         return;
       }
 
@@ -103,49 +123,35 @@ export default function Home() {
     return () => unsub();
   }, []);
 
-  // Stats + drives
+  // OPTIONAL live overrides (if rules allow — otherwise public values remain)
   useEffect(() => {
     (async () => {
+      // live donor count
       try {
-        // Donors (count role in ["user","donor"])
-        try {
-          const donorsQ = query(
-            collection(db, "Users"),
-            where("role", "in", ["user", "donor"])
-          );
-          const donorsCountSnap = await getCountFromServer(donorsQ);
-          setDonorCount(donorsCountSnap.data().count);
-        } catch (e) {
-          // Fallback: read all and filter client-side (in case rules block the query)
-          console.warn("Donor count query failed, falling back to scan:", e);
-          const usersSnap = await getDocs(collection(db, "Users"));
-          const donors = usersSnap.docs.filter(
-            (d) => (d.data().role || "user") === "user" || d.data().role === "donor"
-          );
-          setDonorCount(donors.length);
-        }
+        const donorsQ = query(
+          collection(db, "Users"),
+          where("role", "in", ["user", "donor"])
+        );
+        const donorsCountSnap = await getCountFromServer(donorsQ);
+        setDonorCount(donorsCountSnap.data().count);
+      } catch (e) {
+        // ignore — public value stays
+      }
 
-        // Units delivered in last 30 days
+      // live units (last 30d)
+      try {
         const start30 = new Date();
         start30.setDate(start30.getDate() - 30);
 
-        let reqRows = [];
-        try {
-          // Prefer time-bounded query on 'timestamp' (cheap, no composite index)
-          const reqQ = query(
-            collection(db, "blood_requests"),
-            where("timestamp", ">=", Timestamp.fromDate(start30)),
-            orderBy("timestamp", "desc")
-          );
-          const boundedSnap = await getDocs(reqQ);
-          reqRows = boundedSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
-        } catch (e) {
-          console.warn("Timestamp-bounded requests query failed, scanning all:", e);
-          const reqSnapAll = await getDocs(collection(db, "blood_requests"));
-          reqRows = reqSnapAll.docs.map((d) => ({ id: d.id, ...d.data() }));
-        }
+        const reqQ = query(
+          collection(db, "blood_requests"),
+          where("timestamp", ">=", Timestamp.fromDate(start30)),
+          orderBy("timestamp", "desc")
+        );
+        const boundedSnap = await getDocs(reqQ);
+        const reqRows = boundedSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
 
-        const dateFromDoc = (r) => {
+        const dateFrom = (r) => {
           const raw = r?.date || r?.timestamp;
           if (!raw) return null;
           if (typeof raw === "string") {
@@ -158,43 +164,14 @@ export default function Home() {
 
         const units = reqRows.reduce((sum, r) => {
           const approved = (r.status || "pending").toLowerCase() === "approved";
-          const dt = dateFromDoc(r);
+          const dt = dateFrom(r);
           if (!approved || !dt || dt < start30) return sum;
           const u = Number(r.units || 0);
           return sum + (isNaN(u) ? 0 : u);
         }, 0);
         setUnitsDelivered30d(units);
-
-        // Upcoming drives
-        const donSnap = await getDocs(collection(db, "donation_schedules"));
-        const rows = donSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
-
-        const now = new Date();
-        const parsed = rows
-          .map((d) => {
-            let dateVal = null;
-            if (typeof d.date === "string") {
-              const p = new Date(d.date);
-              if (!isNaN(p.getTime())) dateVal = p;
-            } else if (d.date?.seconds) {
-              dateVal = new Date(d.date.seconds * 1000);
-            } else if (d.timestamp?.seconds) {
-              dateVal = new Date(d.timestamp.seconds * 1000);
-            }
-            return { ...d, _when: dateVal };
-          })
-          .filter(
-            (d) =>
-              d._when &&
-              d._when >= new Date(now.getFullYear(), now.getMonth(), now.getDate()) &&
-              (d.status || "scheduled").toLowerCase() === "scheduled"
-          )
-          .sort((a, b) => a._when - b._when)
-          .slice(0, 3);
-
-        setDrives(parsed);
       } catch (e) {
-        console.error("stats/drives load error:", e);
+        // ignore — public value stays
       }
     })();
   }, []);
@@ -223,16 +200,26 @@ export default function Home() {
             Save Lives Today
           </h1>
           <p className="mt-2 text-sm md:text-base text-white/90 max-w-xl">
-            Request blood when you need it, or schedule a donation with nearby blood banks. Every drop matters.
+            Request blood when you need it, or schedule a donation with nearby
+            blood banks. Every drop matters.
           </p>
           <div className="mt-4 flex gap-2">
-            <Link to="/request-blood" className="bg-white text-red-600 font-semibold px-4 py-2 rounded-md shadow hover:bg-red-50">
+            <Link
+              to="/request-blood"
+              className="bg-white text-red-600 font-semibold px-4 py-2 rounded-md shadow hover:bg-red-50"
+            >
               Request Blood
             </Link>
-            <Link to="/schedule-donation" className="bg-red-600/90 text-white font-semibold px-4 py-2 rounded-md shadow hover:bg-red-700">
+            <Link
+              to="/schedule-donation"
+              className="bg-red-600/90 text-white font-semibold px-4 py-2 rounded-md shadow hover:bg-red-700"
+            >
               Become a Donor
             </Link>
-            <a href="#find" className="bg-white/10 text-white font-semibold px-4 py-2 rounded-md border border-white/30 hover:bg-white/20">
+            <a
+              href="#find"
+              className="bg-white/10 text-white font-semibold px-4 py-2 rounded-md border border-white/30 hover:bg-white/20"
+            >
               Find Blood Bank
             </a>
           </div>
@@ -257,7 +244,9 @@ export default function Home() {
               <Droplet className="w-6 h-6" />
             </div>
             <div>
-              <div className="text-xs text-gray-500 uppercase">Units Delivered (30d)</div>
+              <div className="text-xs text-gray-500 uppercase">
+                Units Delivered (30d)
+              </div>
               <div className="text-2xl font-bold mt-0.5">{unitsDelivered30d}</div>
             </div>
           </div>
@@ -274,28 +263,6 @@ export default function Home() {
         </div>
       </div>
 
-      {/* ELIGIBILITY PROMPT */}
-      {!checkingEligibility && showEligibilityBanner && (
-        <div className="max-w-3xl mx-auto px-4 mt-6">
-          <div className="rounded-lg border border-yellow-300 bg-yellow-50 text-yellow-900 p-4 flex items-start justify-between gap-4">
-            <div>
-              <p className="font-semibold">Complete your Donor Eligibility</p>
-              <p className="text-sm">
-                Before scheduling a donation, please complete the quick eligibility checklist.
-              </p>
-            </div>
-            <div className="flex shrink-0 gap-2">
-              <Link to="/eligibility" className="px-3 py-2 rounded bg-red-600 text-white text-sm font-semibold hover:bg-red-700">
-                Check now
-              </Link>
-              <button onClick={() => setShowEligibilityBanner(false)} className="px-3 py-2 rounded border border-yellow-300 text-yellow-900 text-sm hover:bg-yellow-100">
-                Dismiss
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* ALERTS */}
       {alerts.length > 0 && (
         <div className="max-w-5xl mx-auto px-4 w-full mt-6">
@@ -304,7 +271,11 @@ export default function Home() {
             {alerts.slice(0, 6).map((a) => (
               <div key={a.id} className="rounded border p-3 bg-white shadow-sm">
                 <div className="flex items-center gap-2">
-                  <span className={`px-2 py-0.5 rounded text-xs font-semibold ${sevClass(a.severity)}`}>
+                  <span
+                    className={`px-2 py-0.5 rounded text-xs font-semibold ${sevClass(
+                      a.severity
+                    )}`}
+                  >
                     {a.severity?.toUpperCase() || "ALERT"}
                   </span>
                   <span className="font-bold">{a.bloodGroup}</span>
@@ -312,7 +283,9 @@ export default function Home() {
                 </div>
                 <p className="text-sm mt-1">{a.message}</p>
                 {a.bankName && (
-                  <p className="text-xs text-gray-500 mt-1">Posted by: {a.bankName}</p>
+                  <p className="text-xs text-gray-500 mt-1">
+                    Posted by: {a.bankName}
+                  </p>
                 )}
               </div>
             ))}
@@ -325,17 +298,29 @@ export default function Home() {
         <FindBloodBank />
       </div>
 
-      {/* DRIVES */}
+      {/* DRIVES (optional – keep if you use it) */}
       {drives.length > 0 && (
         <div className="max-w-5xl mx-auto px-4 w-full mt-10">
           <h2 className="text-xl font-semibold mb-3">Upcoming Blood Drives</h2>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
             {drives.map((d) => (
-              <div key={d.id} className="bg-white rounded-xl border border-gray-200 p-4 shadow-sm">
-                <div className="text-sm font-semibold">{d.bankName || "Blood Bank"}</div>
-                <div className="text-xs text-gray-500">{d._when?.toLocaleString() || "TBA"}</div>
-                {d.city && <div className="text-xs text-gray-500">City: {d.city}</div>}
-                <Link to="/schedule-donation" className="mt-3 inline-block text-sm bg-red-600 text-white px-3 py-1.5 rounded-md hover:bg-red-700">
+              <div
+                key={d.id}
+                className="bg-white rounded-xl border border-gray-200 p-4 shadow-sm"
+              >
+                <div className="text-sm font-semibold">
+                  {d.bankName || "Blood Bank"}
+                </div>
+                <div className="text-xs text-gray-500">
+                  {d._when?.toLocaleString() || "TBA"}
+                </div>
+                {d.city && (
+                  <div className="text-xs text-gray-500">City: {d.city}</div>
+                )}
+                <Link
+                  to="/schedule-donation"
+                  className="mt-3 inline-block text-sm bg-red-600 text-white px-3 py-1.5 rounded-md hover:bg-red-700"
+                >
                   Join / Schedule
                 </Link>
               </div>
@@ -350,12 +335,18 @@ export default function Home() {
           <div className="flex items-center gap-2">
             <div className="text-2xl">💡</div>
             <div className="text-sm md:text-base">
-              <span className="font-semibold">Did you know?</span> {facts[factIdx]}
+              <span className="font-semibold">Did you know?</span>{" "}
+              {facts[factIdx]}
             </div>
           </div>
           <div className="hidden md:flex gap-1">
             {facts.map((_, i) => (
-              <span key={i} className={`h-2 w-2 rounded-full ${i === factIdx ? "bg-red-600" : "bg-gray-300"}`} />
+              <span
+                key={i}
+                className={`h-2 w-2 rounded-full ${
+                  i === factIdx ? "bg-red-600" : "bg-gray-300"
+                }`}
+              />
             ))}
           </div>
         </div>
