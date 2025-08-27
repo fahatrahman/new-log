@@ -1,13 +1,6 @@
 // src/components/FindBloodBank.js
 import React, { useEffect, useMemo, useState } from "react";
-import {
-  collection,
-  query,
-  where,
-  orderBy,
-  limit,
-  getDocs,
-} from "firebase/firestore";
+import { collection, query, where, limit, getDocs } from "firebase/firestore";
 import { db } from "./firebase";
 
 const MIN_QUERY_LEN = 2;
@@ -19,7 +12,7 @@ export default function FindBloodBank() {
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
 
-  // tiny debounce helper
+  // simple debounce
   const useDebounce = () => {
     let t;
     return (fn, ms = 300) => {
@@ -34,32 +27,41 @@ export default function FindBloodBank() {
 
     const run = async () => {
       setErr("");
-      // show nothing by default until user types at least 2 chars
       if (qtext.trim().length < MIN_QUERY_LEN) {
         setResults([]);
         return;
       }
       setLoading(true);
+      await new Promise((r) => debounce(r, 300));
 
-      await new Promise((r) => debounce(r, 300)); // 300ms debounce
-
+      const token = qtext.toLowerCase();
       try {
-        // NOTE: collection name matches your DB exactly: "BloodBanks"
-        // Requires banks to store a lowercased token array: searchKeywords: string[]
-        const q = query(
+        // Fast path: search with searchKeywords (no composite index needed)
+        const q1 = query(
           collection(db, "BloodBanks"),
-          where("searchKeywords", "array-contains", qtext.toLowerCase()),
-          orderBy("name"),
+          where("searchKeywords", "array-contains", token),
           limit(PAGE_LIMIT)
         );
-        const snap = await getDocs(q);
+        const snap1 = await getDocs(q1);
+        let rows = snap1.docs.map((d) => ({ id: d.id, ...d.data() }));
+
+        // Fallback if searchKeywords not backfilled yet: scan + filter
+        if (rows.length === 0) {
+          const snap2 = await getDocs(collection(db, "BloodBanks"));
+          rows = snap2.docs
+            .map((d) => ({ id: d.id, ...d.data() }))
+            .filter((b) => {
+              const hay = `${b.name || ""} ${b.address || b.location || ""} ${b.city || ""}`.toLowerCase();
+              return hay.includes(token);
+            });
+        }
+
         if (cancelled) return;
-        setResults(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+        rows.sort((a, b) => (a.name || "").localeCompare(b.name || "")); // client-side sort
+        setResults(rows);
       } catch (e) {
-        console.error(e);
-        setErr(
-          "Search failed. If Firestore asks for an index, click its link once to create it."
-        );
+        console.error("FindBloodBank search error:", e);
+        if (!cancelled) setErr("Search failed.");
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -78,25 +80,19 @@ export default function FindBloodBank() {
         value={qtext}
         onChange={(e) => setQtext(e.target.value)}
         className="w-full border rounded px-3 py-2"
-        placeholder='Type a bank name, city, or area (e.g., "Banani")'
+        placeholder='Type a bank name, city, or area (e.g., "Quantum")'
       />
 
-      {/* empty state */}
       {qtext.trim().length < MIN_QUERY_LEN && (
-        <p className="text-sm text-gray-600 mt-3">
-          Start typing to search blood banks…
-        </p>
+        <p className="text-sm text-gray-600 mt-3">Start typing to search blood banks…</p>
       )}
 
-      {/* loading */}
       {qtext.trim().length >= MIN_QUERY_LEN && loading && (
         <p className="text-sm text-gray-600 mt-3">Searching…</p>
       )}
 
-      {/* error */}
       {err && <p className="text-sm text-red-600 mt-3">{err}</p>}
 
-      {/* results */}
       {qtext.trim().length >= MIN_QUERY_LEN && !loading && !err && results.length === 0 && (
         <p className="text-sm text-gray-600 mt-3">No matches found.</p>
       )}
@@ -111,9 +107,7 @@ export default function FindBloodBank() {
                 {b.city ? `, ${b.city}` : ""}
               </div>
               {b.contactNumber && (
-                <div className="text-sm text-gray-600">
-                  Phone: {b.contactNumber}
-                </div>
+                <div className="text-sm text-gray-600">Phone: {b.contactNumber}</div>
               )}
             </li>
           ))}
@@ -122,22 +116,3 @@ export default function FindBloodBank() {
     </div>
   );
 }
-
-/*
-To power this search, ensure each BloodBanks doc has:
-
-const tokens = (s) =>
-  (s || "").toLowerCase().split(/[^a-z0-9]+/i).filter(Boolean);
-
-const searchKeywords = Array.from(new Set([
-  ...tokens(name),
-  ...tokens(city),
-  ...tokens(address),
-  ...tokens(location),
-  ...(Array.isArray(tags) ? tags.map(t => (t||"").toLowerCase()) : []),
-]));
-
-await setDoc(doc(db, "BloodBanks", uid), { searchKeywords }, { merge: true });
-
-Then the query above will work fast with array-contains.
-*/

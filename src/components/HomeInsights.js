@@ -29,9 +29,7 @@ const addDays = (base, delta) => {
 
 // Parse date from docs that may store either string date OR Timestamp fields
 const extractDate = (docData) => {
-  // prefer explicit timestamp field (your schema has it)
   if (docData?.timestamp?.seconds) return new Date(docData.timestamp.seconds * 1000);
-  // fallback to string date: "2025-08-24" etc.
   if (typeof docData?.date === "string") {
     const d = new Date(docData.date);
     if (!isNaN(d.getTime())) return d;
@@ -62,9 +60,11 @@ export default function HomeInsights() {
 
         // -------- Counts --------
 
-        // Donors = Users with role === "user" (your current setup)
-        // If some documents miss role, you can count all Users instead.
-        const donorsQ = query(collection(db, "Users"), where("role", "==", "user"));
+        // Donors = Users with role in ["user","donor"] (more resilient)
+        const donorsQ = query(
+          collection(db, "Users"),
+          where("role", "in", ["user", "donor"])
+        );
         const donorsCountSnap = await getCountFromServer(donorsQ);
         setDonorCount(donorsCountSnap.data().count);
 
@@ -72,26 +72,25 @@ export default function HomeInsights() {
         const banksCountSnap = await getCountFromServer(collection(db, "BloodBanks"));
         setBanksCount(banksCountSnap.data().count);
 
-        // Approved requests in last 30 days (for charts + units)
-        let qReq = query(
+        // Requests in last 30 days (fetch by time only; filter status client-side)
+        const qReq = query(
           collection(db, "blood_requests"),
-          where("status", "==", "approved"),
           where("timestamp", ">=", ts30),
           orderBy("timestamp", "desc"),
           limit(500)
         );
-        let reqSnap = await getDocs(qReq);
-        let reqRows = reqSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        const reqSnap = await getDocs(qReq);
+        const reqRows = reqSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
 
-        // Donation schedules (we chart approved donations per day too)
-        let qDon = query(
+        // Donation schedules in last 30 days (for daily chart)
+        const qDon = query(
           collection(db, "donation_schedules"),
           where("timestamp", ">=", ts30),
           orderBy("timestamp", "desc"),
           limit(500)
         );
-        let donSnap = await getDocs(qDon);
-        let donRows = donSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        const donSnap = await getDocs(qDon);
+        const donRows = donSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
 
         setReqs(reqRows);
         setDons(donRows);
@@ -156,7 +155,7 @@ export default function HomeInsights() {
         <div className="bg-white rounded-xl border border-gray-200 p-4 shadow-sm">
           <div className="text-xs text-gray-500">Registered Donors</div>
           <div className="text-2xl font-bold mt-0.5">{loading ? "…" : donorCount}</div>
-          <div className="text-[11px] text-gray-400 mt-1">Users with role "user"</div>
+          <div className="text-[11px] text-gray-400 mt-1">Users with role "user" or "donor"</div>
         </div>
         <div className="bg-white rounded-xl border border-gray-200 p-4 shadow-sm">
           <div className="text-xs text-gray-500">Blood Banks</div>
