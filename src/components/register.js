@@ -4,6 +4,7 @@ import { createUserWithEmailAndPassword, updateProfile } from "firebase/auth";
 import { auth, db } from "./firebase";
 import { doc, setDoc } from "firebase/firestore";
 import { Link, useNavigate } from "react-router-dom";
+import logo from "../logo.png"; // ✅ same PNG as on login
 
 const ALL_GROUPS = ["A+","A-","B+","B-","O+","O-","AB+","AB-"];
 
@@ -36,7 +37,6 @@ export default function Register() {
     e.preventDefault();
     setErr("");
 
-    // simple validation for blood bank fields
     if (role === "bloodbank") {
       if (!address.trim() || !city.trim() || !contact.trim()) {
         return setErr("Please provide address, city, and contact phone.");
@@ -95,7 +95,18 @@ export default function Register() {
   return (
     <div className="min-h-screen flex items-center justify-center px-4">
       <div className="w-full max-w-2xl bg-white rounded-xl shadow p-6">
-        <h1 className="text-2xl font-bold text-red-600 mb-4">Create an Account</h1>
+        {/* ✅ Logo (slightly bigger than login) */}
+        <div className="flex items-center justify-center mb-3">
+          <img
+            src={logo}
+            alt="Amar Rokto"
+            className="h-20 w-20 rounded-full object-contain shadow-sm"
+          />
+        </div>
+
+        <h1 className="text-2xl font-bold text-red-600 mb-4 text-center">
+          Create an Account
+        </h1>
 
         {err && (
           <div className="mb-3 text-sm text-red-700 bg-red-100 border border-red-200 rounded p-2">
