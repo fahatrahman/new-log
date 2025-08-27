@@ -1,6 +1,6 @@
 // src/components/BloodBankDetail.js
 import React, { useEffect, useMemo, useState } from "react";
-import { useParams, useNavigate, Link } from "react-router-dom"; // <-- Link added
+import { useParams, useNavigate, Link } from "react-router-dom";
 import { doc, getDoc } from "firebase/firestore";
 import { db } from "./firebase";
 import MapFromAddress from "./MapFromAddress";
@@ -43,93 +43,179 @@ export default function BloodBankDetail() {
 
   const StockTile = ({ label, units }) => {
     const u = Number(units || 0);
-    let bg = "bg-gray-100 text-gray-600 border border-gray-200";
-    if (u <= 2) bg = "bg-red-100 text-red-700 border border-red-200";
-    else if (u >= 3) bg = "bg-green-100 text-green-700 border border-green-200";
+    let tone =
+      "bg-white border border-gray-200 text-gray-800 shadow-sm"; // default
+    if (u <= 2)
+      tone = "bg-red-50 border border-red-200 text-red-700 shadow-sm";
+    else if (u >= 3)
+      tone = "bg-green-50 border border-green-200 text-green-700 shadow-sm";
+
     return (
-      <div className={`rounded-lg flex flex-col items-center justify-center py-6 shadow-sm ${bg}`}>
-        <div className="text-xl font-bold">{label}</div>
-        <div className="text-lg">{u} {u === 1 ? "unit" : "units"}</div>
+      <div className={`rounded-xl py-5 px-4 flex flex-col items-center ${tone}`}>
+        <div className="text-base font-semibold">{label}</div>
+        <div className="mt-1 text-lg font-bold">{u} {u === 1 ? "unit" : "units"}</div>
       </div>
     );
   };
 
+  const supportedCount = Object.values(stock).filter(v => v !== undefined).length;
+
   return (
-    <div className="min-h-screen">
-      {/* HERO */}
+    <div className="min-h-screen font-sans">
+      {/* HERO / HEADER */}
       <div className="bg-gradient-to-r from-red-600 to-rose-600 text-white">
-        <div className="max-w-5xl mx-auto px-4 py-8">
-          <button className="text-white/90 hover:text-white text-sm mb-4" onClick={() => navigate(-1)}>
+        <div className="max-w-6xl mx-auto px-4 py-7">
+          <button
+            className="text-white/90 hover:text-white text-sm mb-3"
+            onClick={() => navigate(-1)}
+          >
             ← Back
           </button>
-          <h1 className="text-2xl md:text-3xl font-bold">{bank.name || "Blood Bank"}</h1>
-          <div className="mt-2 text-white/90 text-sm">{bank.address || bank.location || "Address not provided"}</div>
-          <div className="mt-5 flex flex-wrap gap-2">
-            {/* INTERNAL LINKS -> Link */}
-            <Link
-              to="/request-blood"
-              className="inline-flex items-center px-4 py-2 rounded-md bg-white text-red-600 font-semibold hover:bg-red-50"
-            >
-              Request Blood
-            </Link>
-            <Link
-              to="/schedule-donation"
-              className="inline-flex items-center px-4 py-2 rounded-md bg-black/20 text-white font-semibold hover:bg-black/30"
-            >
-              Schedule Donation
-            </Link>
-            {/* EXTERNAL stays <a> */}
-            <a
-              href={mapLinkForBank(bank)}
-              target="_blank"
-              rel="noreferrer"
-              className="inline-flex items-center px-4 py-2 rounded-md border border-white/40 text-white/95 font-semibold hover:bg-white/10"
-            >
-              Open in Maps
-            </a>
+
+          <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4">
+            <div>
+              <h1 className="text-2xl md:text-3xl font-bold tracking-tight">
+                {bank.name || "Blood Bank"}
+              </h1>
+              <div className="mt-1 text-white/90 text-sm">
+                {bank.address || bank.location || "Address not provided"}
+              </div>
+            </div>
+
+            {/* Quick Actions (right) */}
+            <div className="flex flex-wrap gap-2">
+              <Link
+                to="/request-blood"
+                className="inline-flex items-center px-4 py-2 rounded-md bg-white text-red-600 font-semibold shadow hover:bg-red-50"
+              >
+                Request Blood
+              </Link>
+              <Link
+                to="/schedule-donation"
+                className="inline-flex items-center px-4 py-2 rounded-md bg-black/20 text-white font-semibold hover:bg-black/30"
+              >
+                Schedule Donation
+              </Link>
+              <a
+                href={mapLinkForBank(bank)}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center px-4 py-2 rounded-md border border-white/40 text-white/95 font-semibold hover:bg-white/10"
+              >
+                Open in Maps
+              </a>
+            </div>
           </div>
         </div>
       </div>
 
       {/* BODY */}
-      <div className="max-w-5xl mx-auto px-4 py-6 space-y-6">
-        {/* Contact */}
-        <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
-          <div className="text-sm font-semibold mb-2">Contact</div>
-          {bank.contact || bank.email ? (
-            <div className="space-y-1 text-gray-800">
-              {bank.contact && <div>📞 {bank.contact}</div>}
-              {bank.email && <div>📧 {bank.email}</div>}
+      <div className="max-w-6xl mx-auto px-4 py-6">
+        {/* Top summary row */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+          <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-5">
+            <div className="text-sm text-gray-500 font-semibold">Supported Groups</div>
+            <div className="mt-1 text-2xl font-bold text-gray-900">{supportedCount}</div>
+            <div className="mt-2 text-xs text-gray-500">
+              Total groups with any recorded stock.
             </div>
-          ) : (
-            <div className="text-gray-500 text-sm">No contact info provided.</div>
-          )}
-        </div>
+          </div>
 
-        {/* Stock Grid */}
-        <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
-          <div className="text-sm font-semibold mb-3">Available Blood Units</div>
-          <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-4 gap-4">
-            {GROUPS.map((g) => (
-              <StockTile key={g} label={g} units={stock[g]} />
-            ))}
+          <div className="bg-red-50 rounded-2xl shadow-lg border border-red-200 p-5">
+            <div className="text-sm text-red-700 font-semibold">City</div>
+            <div className="mt-1 text-2xl font-bold text-red-800">
+              {bank.city || "—"}
+            </div>
+            <div className="mt-2 text-xs text-red-700/80">
+              City information (if provided by the bank).
+            </div>
+          </div>
+
+          <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-5">
+            <div className="text-sm text-gray-500 font-semibold">Contact Status</div>
+            <div className="mt-1 text-2xl font-bold text-gray-900">
+              {bank.contact || bank.email ? "Available" : "Missing"}
+            </div>
+            <div className="mt-2 text-xs text-gray-500">
+              Phone and/or email presence.
+            </div>
           </div>
         </div>
 
-        {/* Map */}
-        <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
-          <div className="flex items-center justify-between mb-2">
-            <div className="text-sm font-semibold">Location</div>
-            <a
-              href={mapLinkForBank(bank)}
-              target="_blank"
-              rel="noreferrer"
-              className="text-xs font-semibold px-3 py-1.5 rounded-md border border-gray-300 hover:bg-gray-50"
-            >
-              Open in Google Maps
-            </a>
+        {/* Main content grid */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Left: Overview + Contact */}
+          <div className="space-y-6 lg:col-span-1">
+            {/* Overview Card (white) */}
+            <div className="bg-white rounded-2xl border border-gray-200 shadow-lg p-5">
+              <div className="text-sm font-semibold text-gray-700 mb-2">Overview</div>
+              <div className="text-sm text-gray-700">
+                {bank.description ? (
+                  <p className="leading-relaxed">{bank.description}</p>
+                ) : (
+                  <p className="text-gray-500">No description provided.</p>
+                )}
+              </div>
+              {bank.website && (
+                <a
+                  href={bank.website}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex mt-4 text-sm font-semibold text-red-600 hover:underline"
+                >
+                  Visit Website →
+                </a>
+              )}
+            </div>
+
+            {/* Contact Card (soft red) */}
+            <div className="bg-red-50 rounded-2xl border border-red-200 shadow-lg p-5">
+              <div className="text-sm font-semibold text-red-800 mb-2">Contact</div>
+              {bank.contact || bank.email ? (
+                <div className="space-y-1 text-red-900">
+                  {bank.contact && <div>📞 {bank.contact}</div>}
+                  {bank.email && <div>📧 {bank.email}</div>}
+                  {bank.address && <div>📍 {bank.address}</div>}
+                </div>
+              ) : (
+                <div className="text-red-700/80 text-sm">No contact info provided.</div>
+              )}
+            </div>
           </div>
-          <MapFromAddress bank={bank} height="300px" hideTitle />
+
+          {/* Right: Stock + Map */}
+          <div className="space-y-6 lg:col-span-2">
+            {/* Stock Grid (white) */}
+            <div className="bg-white rounded-2xl border border-gray-200 shadow-lg p-5">
+              <div className="flex items-center justify-between mb-3">
+                <div className="text-sm font-semibold text-gray-700">Available Blood Units</div>
+                <div className="text-xs text-gray-500">
+                  Updated as recorded by the bank
+                </div>
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
+                {GROUPS.map((g) => (
+                  <StockTile key={g} label={g} units={stock[g]} />
+                ))}
+              </div>
+            </div>
+
+            {/* Map Card (soft red) */}
+            <div className="bg-red-50 rounded-2xl border border-red-200 shadow-lg p-5">
+              <div className="flex items-center justify-between mb-2">
+                <div className="text-sm font-semibold text-red-800">Location</div>
+                <a
+                  href={mapLinkForBank(bank)}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-xs font-semibold px-3 py-1.5 rounded-md border border-red-300 text-red-800 hover:bg-red-100"
+                >
+                  Open in Google Maps
+                </a>
+              </div>
+              <MapFromAddress bank={bank} height="320px" hideTitle />
+            </div>
+          </div>
         </div>
       </div>
     </div>

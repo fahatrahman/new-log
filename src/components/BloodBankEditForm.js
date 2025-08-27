@@ -16,16 +16,6 @@ import { db } from "./firebase";
 import { getAuth, signOut } from "firebase/auth";
 import AlertManager from "./AlertManager";
 
-/**
- * Blood bank inventory + moderation screen
- * - live stock editing (± per group)
- * - approve/reject donations & requests (with stock checks)
- * - in-app notifications
- * - urgent alerts manager
- * - Schedule Donation History + Blood Request History
- * - compatible with bloodGroup OR bloodGroups fields
- * - compatible with bloodBankId OR bankId fields
- */
 export default function BloodBankEditForm() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -35,18 +25,28 @@ export default function BloodBankEditForm() {
   const [pendingDonations, setPendingDonations] = useState([]);
   const [pendingRequests, setPendingRequests] = useState([]);
 
-  // histories (approved/rejected)
   const [historyDonations, setHistoryDonations] = useState([]);
   const [historyRequests, setHistoryRequests] = useState([]);
   const [showAllDonHistory, setShowAllDonHistory] = useState(false);
   const [showAllReqHistory, setShowAllReqHistory] = useState(false);
 
   const [selectedItem, setSelectedItem] = useState(null);
-  const [modalType, setModalType] = useState(""); // "donation" | "request"
+  const [modalType, setModalType] = useState("");
 
   const [stockWarning, setStockWarning] = useState("");
   const [insufficientGroup, setInsufficientGroup] = useState("");
   const [shakeGroup, setShakeGroup] = useState("");
+
+  const [showEdit, setShowEdit] = useState(false);
+  const [editData, setEditData] = useState({
+    name: "",
+    address: "",
+    city: "",
+    contact: "",
+    email: "",
+    lowStockThreshold: 5,
+    bannerUrl: "",
+  });
 
   const auth = getAuth();
 
@@ -73,12 +73,8 @@ export default function BloodBankEditForm() {
     }
   };
 
-  // ---------- helpers for search keywords (NEW) ----------
   const tokenize = (s) =>
-    (s || "")
-      .toLowerCase()
-      .split(/[^a-z0-9]+/i)
-      .filter(Boolean);
+    (s || "").toLowerCase().split(/[^a-z0-9]+/i).filter(Boolean);
 
   const computeSearchKeywords = (bank) => {
     const parts = [
@@ -94,9 +90,7 @@ export default function BloodBankEditForm() {
     groups.forEach((g) => parts.push(String(g).toLowerCase()));
     return Array.from(new Set(parts));
   };
-  // -------------------------------------------------------
 
-  // Load bank + normalize stock to supported groups
   useEffect(() => {
     const ref = doc(db, "BloodBanks", id);
     const unsub = onSnapshot(ref, (snap) => {
@@ -104,7 +98,20 @@ export default function BloodBankEditForm() {
       const data = snap.data();
       setBloodBank(data);
 
-      // ensure searchKeywords are present (NEW)
+      setEditData((p) => ({
+        ...p,
+        name: data.name || "",
+        address: data.address || data.location || "",
+        city: data.city || "",
+        contact: data.contactNumber || data.contact || "",
+        email: data.email || "",
+        lowStockThreshold:
+          typeof data.lowStockThreshold === "number"
+            ? data.lowStockThreshold
+            : 5,
+        bannerUrl: data.bannerUrl || "",
+      }));
+
       try {
         const currentKW = Array.isArray(data.searchKeywords)
           ? data.searchKeywords
@@ -115,13 +122,11 @@ export default function BloodBankEditForm() {
           (currentKW.length === 0 ||
             freshKW.join("|") !== currentKW.join("|"))
         ) {
-          updateDoc(doc(db, "BloodBanks", id), {
-            searchKeywords: freshKW,
-          }).catch(() => {});
+          updateDoc(doc(db, "BloodBanks", id), { searchKeywords: freshKW }).catch(
+            () => {}
+          );
         }
-      } catch {
-        /* no-op */
-      }
+      } catch {}
 
       const supported = Array.isArray(data.bloodGroup)
         ? data.bloodGroup
@@ -137,74 +142,64 @@ export default function BloodBankEditForm() {
     return () => unsub();
   }, [id]);
 
-  // Pending donations (bankId OR bloodBankId)
   useEffect(() => {
     const col = collection(db, "donation_schedules");
-
     const unsubA = onSnapshot(
       query(col, where("bloodBankId", "==", id)),
       (snapshot) => {
         const list = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
         const filtered = list.filter(
-            (x) => !x.status || x.status.toLowerCase() === "pending"
+          (x) => !x.status || x.status.toLowerCase() === "pending"
         );
         setPendingDonations((prev) => mergeUniqueById(prev, filtered));
       }
     );
-
     const unsubB = onSnapshot(
       query(col, where("bankId", "==", id)),
       (snapshot) => {
         const list = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
         const filtered = list.filter(
-            (x) => !x.status || x.status.toLowerCase() === "pending"
+          (x) => !x.status || x.status.toLowerCase() === "pending"
         );
         setPendingDonations((prev) => mergeUniqueById(prev, filtered));
       }
     );
-
     return () => {
       unsubA();
       unsubB();
     };
   }, [id]);
 
-  // Pending blood requests (bankId OR bloodBankId)
   useEffect(() => {
     const col = collection(db, "blood_requests");
-
     const unsubA = onSnapshot(
       query(col, where("bloodBankId", "==", id)),
       (snapshot) => {
         const list = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
         const filtered = list.filter(
-            (x) => !x.status || x.status.toLowerCase() === "pending"
+          (x) => !x.status || x.status.toLowerCase() === "pending"
         );
         setPendingRequests((prev) => mergeUniqueById(prev, filtered));
       }
     );
-
     const unsubB = onSnapshot(
       query(col, where("bankId", "==", id)),
       (snapshot) => {
         const list = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
         const filtered = list.filter(
-            (x) => !x.status || x.status.toLowerCase() === "pending"
+          (x) => !x.status || x.status.toLowerCase() === "pending"
         );
         setPendingRequests((prev) => mergeUniqueById(prev, filtered));
       }
     );
-
     return () => {
       unsubA();
       unsubB();
     };
   }, [id]);
 
-  // Donation history (approved/rejected), newest first
   useEffect(() => {
     const col = collection(db, "donation_schedules");
-
     const unsub1 = onSnapshot(
       query(
         col,
@@ -217,7 +212,6 @@ export default function BloodBankEditForm() {
         setHistoryDonations((prev) => mergeReplace(prev, rows));
       }
     );
-
     const unsub2 = onSnapshot(
       query(
         col,
@@ -230,17 +224,14 @@ export default function BloodBankEditForm() {
         setHistoryDonations((prev) => mergeReplace(prev, rows));
       }
     );
-
     return () => {
       unsub1();
       unsub2();
     };
   }, [id]);
 
-  // Request history (approved/rejected), newest first
   useEffect(() => {
     const col = collection(db, "blood_requests");
-
     const unsub1 = onSnapshot(
       query(
         col,
@@ -253,7 +244,6 @@ export default function BloodBankEditForm() {
         setHistoryRequests((prev) => mergeReplace(prev, rows));
       }
     );
-
     const unsub2 = onSnapshot(
       query(
         col,
@@ -266,14 +256,12 @@ export default function BloodBankEditForm() {
         setHistoryRequests((prev) => mergeReplace(prev, rows));
       }
     );
-
     return () => {
       unsub1();
       unsub2();
     };
   }, [id]);
 
-  // helpers
   const mergeUniqueById = (a, b) => {
     const map = new Map();
     [...a, ...b].forEach((x) => map.set(x.id, x));
@@ -282,7 +270,6 @@ export default function BloodBankEditForm() {
   const mergeReplace = (a, b) => {
     const map = new Map(a.map((x) => [x.id, x]));
     b.forEach((x) => map.set(x.id, x));
-    // sort newest first by timestamp.seconds (fallback to 0)
     return [...map.values()].sort(
       (x, y) => (y?.timestamp?.seconds || 0) - (x?.timestamp?.seconds || 0)
     );
@@ -301,7 +288,6 @@ export default function BloodBankEditForm() {
     setBloodStock(next);
     pushStock(next);
   };
-
   const dec = (group) => {
     const current = bloodStock[group] || 0;
     if (current === 0) return;
@@ -310,7 +296,6 @@ export default function BloodBankEditForm() {
     pushStock(next);
   };
 
-  // in-app notification
   const createNotification = async ({ userId, kind, refId, status, message }) => {
     try {
       await addDoc(collection(db, "notifications"), {
@@ -329,12 +314,10 @@ export default function BloodBankEditForm() {
 
   const handleRequestAction = async (colName, item, newStatus) => {
     try {
-      // If approving a blood request, ensure stock is sufficient and decrement
       if (colName === "blood_requests" && newStatus === "approved") {
         const need = Number(item.units || 0);
         const group = item.bloodGroup;
         const have = Number(bloodStock[group] || 0);
-
         if (need > have) {
           const msg = `Not enough ${group} units to approve (${need} needed, ${have} available).`;
           setStockWarning(msg);
@@ -347,15 +330,13 @@ export default function BloodBankEditForm() {
           }, 3000);
           return;
         }
-
         const next = { ...bloodStock, [group]: have - need };
         setBloodStock(next);
         await pushStock(next);
       }
 
-      // If approving a donation, increase stock for that blood group (NEW)
       if (colName === "donation_schedules" && newStatus === "approved") {
-        const addUnits = Number(item.units || 1); // default to 1 if not provided
+        const addUnits = Number(item.units || 1);
         const group = item.bloodGroup;
         if (group) {
           const have = Number(bloodStock[group] || 0);
@@ -365,10 +346,10 @@ export default function BloodBankEditForm() {
         }
       }
 
-      // Update status
-      await updateDoc(doc(db, colName, item.id), { status: newStatus.toLowerCase() });
+      await updateDoc(doc(db, colName, item.id), {
+        status: newStatus.toLowerCase(),
+      });
 
-      // Notify requester/donor
       if (colName === "blood_requests") {
         await createNotification({
           userId: item.userId,
@@ -387,7 +368,6 @@ export default function BloodBankEditForm() {
         });
       }
 
-      // Update local state
       if (colName === "donation_schedules") {
         setPendingDonations((prev) => prev.filter((d) => d.id !== item.id));
       } else if (colName === "blood_requests") {
@@ -399,20 +379,19 @@ export default function BloodBankEditForm() {
     }
   };
 
-  if (!bloodBank) return <p className="p-4">Loading...</p>;
+  if (!bloodBank) return <p className="p-6">Loading…</p>;
 
   const statusClass = (s) => {
     switch ((s || "pending").toLowerCase()) {
       case "approved":
-        return "bg-green-100 text-green-800";
+        return "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200";
       case "rejected":
-        return "bg-red-100 text-red-800";
+        return "bg-rose-50 text-rose-700 ring-1 ring-rose-200";
       default:
-        return "bg-yellow-100 text-yellow-800";
+        return "bg-amber-50 text-amber-700 ring-1 ring-amber-200";
     }
   };
 
-  // no hook: compute directly, always runs
   const supportedGroups =
     Array.isArray(bloodBank.bloodGroup)
       ? bloodBank.bloodGroup
@@ -420,308 +399,499 @@ export default function BloodBankEditForm() {
       ? bloodBank.bloodGroups
       : [];
 
-  // row renderer for history
-  const renderRow = (item, type) => {
-    return (
-      <li key={item.id} className={`p-3 rounded border ${statusClass(item.status)} text-sm`}>
-        <div className="flex justify-between gap-3">
-          <div className="space-y-0.5">
-            <div className="font-semibold capitalize">{item.status || "pending"}</div>
-            <div>
-              {type === "donation" ? (
-                <>
-                  <span className="font-medium">{item.donorName || item.name || "Donor"}</span>
-                  {item.bloodGroup && <> · {item.bloodGroup}</>}
-                </>
-              ) : (
-                <>
-                  <span className="font-medium">{item.requesterName || item.name || "Requester"}</span>
-                  {item.bloodGroup && <> · {item.bloodGroup}</>}
-                  {item.units && <> · {item.units} unit(s)</>}
-                </>
-              )}
-            </div>
-            <div className="text-gray-700">
-              {item.date ? toDateString(item.date) : item.time ? item.time : ""}
-            </div>
-            {(item.notes || item.additionalInfo) && ( // show additionalInfo too (NEW)
-              <div className="text-gray-600">Notes: {item.notes || item.additionalInfo}</div>
+  const renderRow = (item, type) => (
+    <li key={item.id} className={`p-3 rounded-lg ${statusClass(item.status)}`}>
+      <div className="flex justify-between gap-3">
+        <div className="space-y-0.5">
+          <div className="font-semibold capitalize">{item.status || "pending"}</div>
+          <div className="text-sm">
+            {type === "donation" ? (
+              <>
+                <span className="font-medium">
+                  {item.donorName || item.name || "Donor"}
+                </span>
+                {item.bloodGroup && <> · {item.bloodGroup}</>}
+              </>
+            ) : (
+              <>
+                <span className="font-medium">
+                  {item.requesterName || item.name || "Requester"}
+                </span>
+                {item.bloodGroup && <> · {item.bloodGroup}</>}
+                {item.units && <> · {item.units} unit(s)</>}
+              </>
             )}
           </div>
-          <button
-            className="shrink-0 h-8 px-3 rounded bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold"
-            onClick={() => {
-              setSelectedItem(item);
-              setModalType(type === "donation" ? "donation" : "request");
-            }}
-          >
-            View
-          </button>
+          <div className="text-xs opacity-80">
+            {item.date ? toDateString(item.date) : item.time ? item.time : ""}
+          </div>
+          {(item.notes || item.additionalInfo) && (
+            <div className="text-xs opacity-80">
+              Notes: {item.notes || item.additionalInfo}
+            </div>
+          )}
         </div>
-      </li>
-    );
-  };
+        <button
+          className="ui-btn ui-info"
+          onClick={() => {
+            setSelectedItem(item);
+            setModalType(type === "donation" ? "donation" : "request");
+          }}
+        >
+          View
+        </button>
+      </div>
+    </li>
+  );
 
   return (
-    <div className="min-h-screen flex flex-col gap-8">
-      {/* (No local header nav—use global Navbar) */}
+    <div className="min-h-screen bg-gray-50/60">
+      {/* UI helpers + NEW heading font */}
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@600;700&display=swap');
+        .ui-card{background:#fff;border-radius:14px;border:1px solid rgba(0,0,0,.06);box-shadow:0 8px 28px rgba(0,0,0,.06)}
+        .ui-btn{display:inline-flex;align-items:center;gap:.5rem;border-radius:10px;padding:.6rem 1rem;font-weight:700;font-size:.875rem;line-height:1;transition:transform .06s ease,box-shadow .2s ease}
+        .ui-btn:active{transform:translateY(1px)}
+        .ui-primary{background:#dc2626;color:#fff} .ui-primary:hover{background:#b91c1c}
+        .ui-soft{background:#f3f4f6;color:#111827} .ui-soft:hover{background:#e5e7eb}
+        .ui-outline{border:1px solid #e5e7eb;color:#111827;background:#fff} .ui-outline:hover{background:#f9fafb}
+        .ui-success{background:#059669;color:#fff} .ui-success:hover{background:#047857}
+        .ui-danger{background:#e11d48;color:#fff} .ui-danger:hover{background:#be123c}
+        .ui-info{background:#2563eb;color:#fff} .ui-info:hover{background:#1d4ed8}
+        @keyframes card-shake{0%{transform:translateX(0)}25%{transform:translateX(-3px)}50%{transform:translateX(3px)}75%{transform:translateX(-3px)}100%{transform:translateX(0)}}
+        .animate-shake{animation:card-shake .35s ease-in-out 2}
 
-      {stockWarning && (
-        <p className="max-w-6xl mx-auto p-2 bg-yellow-100 text-red-700 font-semibold rounded mb-1 text-center animate-pulse">
-          {stockWarning}
-        </p>
-      )}
+        /* Section titles: bigger + new font */
+        .ui-section-title{
+          font-family:'Poppins', system-ui, -apple-system, Segoe UI, Roboto, 'Helvetica Neue', Arial, 'Noto Sans', 'Apple Color Emoji','Segoe UI Emoji';
+          font-size:1.25rem;        /* text-xl */
+          line-height:1.35;
+          font-weight:700;
+          letter-spacing:.2px;
+        }
+      `}</style>
 
-      {/* Info + Stock */}
-      <div className="flex flex-col md:flex-row gap-6 p-6 max-w-6xl mx-auto mt-2">
-        <div className="md:w-1/3 bg-white rounded-lg shadow p-6 space-y-2">
-          <h2 className="text-2xl font-bold text-center">{bloodBank.name}</h2>
-          <p>
-            <strong>Location:</strong> {bloodBank.address || bloodBank.location || "N/A"}
-          </p>
-          <p>
-            <strong>Contact:</strong> {bloodBank.contactNumber || bloodBank.contact || "N/A"}
-          </p>
-          <p>
-            <strong>Email:</strong> {bloodBank.email || "N/A"}
-          </p>
-          <div className="flex gap-2 pt-3">
-            <button
-              className="bg-red-600 text-white font-semibold rounded px-3 py-1 hover:bg-red-700"
-              onClick={() => navigate(`/bloodbank/${id}`)}
-            >
+      {/* Header */}
+      <div
+        className="relative text-white"
+        style={{
+          background:
+            bloodBank.bannerUrl && bloodBank.bannerUrl.length > 4
+              ? `linear-gradient(0deg, rgba(220,38,38,.85), rgba(225,29,72,.85)), url(${bloodBank.bannerUrl}) center/cover no-repeat`
+              : "linear-gradient(90deg, #e11d48, #dc2626)",
+        }}
+      >
+        <div className="max-w-6xl mx-auto px-4 py-5 flex flex-wrap items-center gap-3">
+          <div className="mr-auto">
+            <h1 className="text-2xl md:text-3xl font-semibold tracking-tight drop-shadow">
+              {bloodBank.name || "Blood Bank"}
+            </h1>
+            <div className="text-white/90 text-sm">
+              {bloodBank.address || bloodBank.location || "Address not provided"}
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <label className="ui-btn ui-outline cursor-pointer">
+              Upload banner
+              <input type="file" accept="image/*" className="hidden" />
+            </label>
+            <button className="ui-btn ui-soft" onClick={() => setShowEdit(true)}>
+              Edit profile
+            </button>
+            <button className="ui-btn ui-outline" onClick={() => navigate(`/bloodbank/${id}`)}>
               View public page
             </button>
-            <button
-              className="bg-gray-200 text-gray-800 font-semibold rounded px-3 py-1 hover:bg-gray-300"
-              onClick={handleLogout}
-            >
+            <button className="ui-btn ui-danger" onClick={handleLogout}>
               Logout
             </button>
           </div>
-          <p className="mt-3 text-xs text-gray-500 text-center">Use the controls to adjust stock.</p>
         </div>
+      </div>
 
-        <div className="md:w-2/3 grid grid-cols-1 sm:grid-cols-2 gap-4">
-          {supportedGroups.map((group) => {
-            const qty = Number(bloodStock[group] || 0);
-            const threshold = Number(bloodBank.lowStockThreshold ?? 5);
-            const isLow = qty <= threshold;
-            const shake = shakeGroup === group;
-            const highlight = insufficientGroup === group;
+      {stockWarning && (
+        <div className="max-w-6xl mx-auto mt-3 px-4">
+          <p className="ui-card p-3 text-center text-rose-700 bg-rose-50 border-rose-200">
+            {stockWarning}
+          </p>
+        </div>
+      )}
 
-            return (
-              <div
-                key={group}
-                className={`relative flex flex-col items-center p-4 rounded-lg shadow-md bg-gradient-to-r from-red-500 to-red-600 text-white transition ${
-                  shake ? "animate-shake" : ""
-                } ${highlight ? "ring-4 ring-yellow-300" : ""}`}
-              >
-                <span className="font-bold text-xl mb-2">{group}</span>
-                {isLow && (
-                  <span className="absolute top-2 right-2 bg-yellow-300 text-red-900 font-bold text-xs px-2 py-1 rounded-full animate-pulse">
-                    Low Stock
-                  </span>
-                )}
-                <span className="text-2xl font-mono mb-2">{qty}</span>
-                <div className="flex gap-2">
-                  <button
-                    onClick={() => dec(group)}
-                    className="bg-red-800 hover:bg-red-900 rounded px-4 py-1 font-semibold"
-                  >
-                    –
-                  </button>
-                  <button
-                    onClick={() => inc(group)}
-                    className="bg-green-800 hover:bg-green-900 rounded px-4 py-1 font-semibold"
-                  >
-                    +
-                  </button>
-                </div>
+      {/* CONTENT GRID */}
+      <div className="max-w-6xl mx-auto p-4 grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Left column */}
+        <div className="lg:col-span-2 space-y-6">
+          {/* Inventory */}
+          <div className="ui-card p-5 bg-white">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="ui-section-title">Blood Inventory</h2>
+              <div className="text-xs text-gray-500">
+                Click +/– to adjust (yellow badge = low)
               </div>
-            );
-          })}
-        </div>
-      </div>
+            </div>
 
-      {/* Pending Donations */}
-      <div className="max-w-6xl mx-auto p-6 bg-white rounded-lg shadow">
-        <h3 className="text-xl font-bold mb-4 text-red-600">Pending Donation Requests</h3>
-        {pendingDonations.length ? (
-          <ul className="space-y-2">
-            {pendingDonations.map((don) => (
-              <li
-                key={don.id}
-                className={`flex justify-between items-center p-2 border rounded ${statusClass(don.status)}`}
-              >
-                <span>
-                  {don.donorName || don.name || "Donor"} – {don.bloodGroup || "N/A"} –{" "}
-                  {toDateString(don.date)}
-                </span>
-                <div className="flex gap-2">
-                  {(!don.status || (don.status || "").toLowerCase() === "pending") && (
-                    <>
-                      <button
-                        className="bg-green-600 text-white px-3 py-1 rounded hover:bg-green-700"
-                        onClick={() =>
-                          handleRequestAction("donation_schedules", don, "approved")
-                        }
-                      >
-                        Approve
-                      </button>
-                      <button
-                        className="bg-red-600 text-white px-3 py-1 rounded hover:bg-red-700"
-                        onClick={() =>
-                          handleRequestAction("donation_schedules", don, "rejected")
-                        }
-                      >
-                        Reject
-                      </button>
-                    </>
-                  )}
-                  <button
-                    className="bg-blue-600 text-white px-3 py-1 rounded hover:bg-blue-700"
-                    onClick={() => {
-                      setSelectedItem(don);
-                      setModalType("donation");
-                    }}
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
+              {supportedGroups.map((group, i) => {
+                const qty = Number(bloodStock[group] || 0);
+                const threshold = Number(bloodBank.lowStockThreshold ?? 5);
+                const isLow = qty <= threshold;
+                const shake = shakeGroup === group;
+                const highlight = insufficientGroup === group;
+                const tone =
+                  i % 2 === 0
+                    ? "bg-white border-gray-100"
+                    : "bg-rose-50 border-rose-100";
+
+                return (
+                  <div
+                    key={group}
+                    className={`rounded-lg p-4 text-center border ${tone} ${
+                      highlight ? "ring-4 ring-amber-300" : ""
+                    } ${shake ? "animate-shake" : ""} shadow-sm`}
                   >
-                    View
-                  </button>
-                </div>
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p>No donation requests.</p>
-        )}
-      </div>
+                    <div className="text-sm font-semibold tracking-wide">
+                      {group}
+                    </div>
+                    <div className="mt-1 text-2xl font-bold">{qty}</div>
 
-      {/* Pending Blood Requests */}
-      <div className="max-w-6xl mx-auto p-6 bg-white rounded-lg shadow">
-        <h3 className="text-xl font-bold mb-4 text-red-600">Pending Blood Requests</h3>
-        {pendingRequests.length ? (
-          <ul className="space-y-2">
-            {pendingRequests.map((req) => (
-              <li
-                key={req.id}
-                className={`flex justify-between items-center p-2 border rounded ${statusClass(req.status)}`}
-              >
-                <span>
-                  {req.requesterName || req.name || "Requester"} – {req.bloodGroup || "N/A"} –{" "}
-                  {req.units || 0} unit(s) – {toDateString(req.date)}
-                </span>
-                <div className="flex gap-2">
-                  {(!req.status || (req.status || "").toLowerCase() === "pending") && (
-                    <>
-                      <button
-                        className="bg-green-600 text-white px-3 py-1 rounded hover:bg-green-700"
-                        onClick={() => handleRequestAction("blood_requests", req, "approved")}
-                      >
-                        Approve
+                    {isLow && (
+                      <div className="mt-2 inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded bg-amber-100 text-amber-800">
+                        Low
+                      </div>
+                    )}
+
+                    <div className="mt-3 flex justify-center gap-2">
+                      <button onClick={() => dec(group)} className="ui-btn ui-danger">
+                        –
                       </button>
-                      <button
-                        className="bg-red-600 text-white px-3 py-1 rounded hover:bg-red-700"
-                        onClick={() => handleRequestAction("blood_requests", req, "rejected")}
-                      >
-                        Reject
+                      <button onClick={() => inc(group)} className="ui-btn ui-success">
+                        +
                       </button>
-                    </>
-                  )}
-                  <button
-                    className="bg-blue-600 text-white px-3 py-1 rounded hover:bg-blue-700"
-                    onClick={() => {
-                      setSelectedItem(req);
-                      setModalType("request");
-                    }}
-                  >
-                    View
-                  </button>
-                </div>
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p>No blood requests.</p>
-        )}
-      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
 
-      {/* Donation History */}
-      <div className="max-w-6xl mx-auto p-6 bg-white rounded-lg shadow">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-xl font-bold text-red-600">Schedule Donation History</h3>
-          {historyDonations.length > 6 && (
-            <button
-              className="text-sm font-semibold text-red-600 hover:underline"
-              onClick={() => setShowAllDonHistory((v) => !v)}
-            >
-              {showAllDonHistory ? "Show less" : `Show all (${historyDonations.length})`}
-            </button>
-          )}
+          {/* Pending queues */}
+          <div className="grid md:grid-cols-2 gap-6">
+            <div className="ui-card p-5 bg-rose-50 border-rose-100">
+              <h3 className="ui-section-title text-red-600">
+                Pending Donation Requests
+              </h3>
+              <div className="mt-3 space-y-2">
+                {pendingDonations.length ? (
+                  pendingDonations.map((don) => (
+                    <div
+                      key={don.id}
+                      className={`flex items-center justify-between gap-3 p-3 rounded-lg ${statusClass(
+                        don.status
+                      )}`}
+                    >
+                      <div className="text-sm">
+                        <span className="font-medium">
+                          {don.donorName || don.name || "Donor"}
+                        </span>{" "}
+                        – {don.bloodGroup || "N/A"} – {toDateString(don.date)}
+                      </div>
+                      <div className="shrink-0 flex gap-2">
+                        {(!don.status ||
+                          (don.status || "").toLowerCase() === "pending") && (
+                          <>
+                            <button
+                              className="ui-btn ui-success"
+                              onClick={() =>
+                                handleRequestAction(
+                                  "donation_schedules",
+                                  don,
+                                  "approved"
+                                )
+                              }
+                            >
+                              Approve
+                            </button>
+                            <button
+                              className="ui-btn ui-danger"
+                              onClick={() =>
+                                handleRequestAction(
+                                  "donation_schedules",
+                                  don,
+                                  "rejected"
+                                )
+                              }
+                            >
+                              Reject
+                            </button>
+                          </>
+                        )}
+                        <button
+                          className="ui-btn ui-info"
+                          onClick={() => {
+                            setSelectedItem(don);
+                            setModalType("donation");
+                          }}
+                        >
+                          View
+                        </button>
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <p className="text-sm text-gray-600">No donation requests.</p>
+                )}
+              </div>
+            </div>
+
+            <div className="ui-card p-5 bg-white">
+              <h3 className="ui-section-title text-red-600">
+                Pending Blood Requests
+              </h3>
+              <div className="mt-3 space-y-2">
+                {pendingRequests.length ? (
+                  pendingRequests.map((req) => (
+                    <div
+                      key={req.id}
+                      className={`flex items-center justify-between gap-3 p-3 rounded-lg ${statusClass(
+                        req.status
+                      )}`}
+                    >
+                      <div className="text-sm">
+                        <span className="font-medium">
+                          {req.requesterName || req.name || "Requester"}
+                        </span>{" "}
+                        – {req.bloodGroup || "N/A"} – {req.units || 0} unit(s) –{" "}
+                        {toDateString(req.date)}
+                      </div>
+                      <div className="shrink-0 flex gap-2">
+                        {(!req.status ||
+                          (req.status || "").toLowerCase() === "pending") && (
+                          <>
+                            <button
+                              className="ui-btn ui-success"
+                              onClick={() =>
+                                handleRequestAction(
+                                  "blood_requests",
+                                  req,
+                                  "approved"
+                                )
+                              }
+                            >
+                              Approve
+                            </button>
+                            <button
+                              className="ui-btn ui-danger"
+                              onClick={() =>
+                                handleRequestAction(
+                                  "blood_requests",
+                                  req,
+                                  "rejected"
+                                )
+                              }
+                            >
+                              Reject
+                            </button>
+                          </>
+                        )}
+                        <button
+                          className="ui-btn ui-info"
+                          onClick={() => {
+                            setSelectedItem(req);
+                            setModalType("request");
+                          }}
+                        >
+                          View
+                        </button>
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <p className="text-sm text-gray-600">No blood requests.</p>
+                )}
+              </div>
+            </div>
+          </div>
         </div>
-        {historyDonations.length ? (
-          <ul className="space-y-2">
-            {(showAllDonHistory ? historyDonations : historyDonations.slice(0, 6)).map((d) =>
-              renderRow(d, "donation")
-            )}
-          </ul>
-        ) : (
-          <p className="text-sm text-gray-600">No past donations yet.</p>
-        )}
-      </div>
 
-      {/* Blood Request History */}
-      <div className="max-w-6xl mx-auto p-6 bg-white rounded-lg shadow mb-8">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-xl font-bold text-red-600">Blood Request History</h3>
-          {historyRequests.length > 6 && (
-            <button
-              className="text-sm font-semibold text-red-600 hover:underline"
-              onClick={() => setShowAllReqHistory((v) => !v)}
-            >
-              {showAllReqHistory ? "Show less" : `Show all (${historyRequests.length})`}
-            </button>
-          )}
+        {/* Right column */}
+        <div className="space-y-6">
+          <div className="ui-card p-5 bg-white max-h-[420px] overflow-auto">
+            <div className="flex items-center justify-between">
+              <h3 className="ui-section-title">Schedule Donation History</h3>
+              {historyDonations.length > 6 && (
+                <button
+                  className="ui-btn ui-outline"
+                  onClick={() => setShowAllDonHistory((v) => !v)}
+                >
+                  {showAllDonHistory ? "Show less" : `Show all (${historyDonations.length})`}
+                </button>
+              )}
+            </div>
+            <ul className="mt-3 space-y-2">
+              {historyDonations.length ? (
+                (showAllDonHistory ? historyDonations : historyDonations.slice(0, 10)).map((d) =>
+                  renderRow(d, "donation")
+                )
+              ) : (
+                <p className="text-sm text-gray-500">No past donations yet.</p>
+              )}
+            </ul>
+          </div>
+
+          <div className="ui-card p-5 bg-rose-50 border-rose-100 max-h-[420px] overflow-auto">
+            <div className="flex items-center justify-between">
+              <h3 className="ui-section-title">Blood Request History</h3>
+              {historyRequests.length > 6 && (
+                <button
+                  className="ui-btn ui-outline"
+                  onClick={() => setShowAllReqHistory((v) => !v)}
+                >
+                  {showAllReqHistory ? "Show less" : `Show all (${historyRequests.length})`}
+                </button>
+              )}
+            </div>
+            <ul className="mt-3 space-y-2">
+              {historyRequests.length ? (
+                (showAllReqHistory ? historyRequests : historyRequests.slice(0, 10)).map((r) =>
+                  renderRow(r, "request")
+                )
+              ) : (
+                <p className="text-sm text-gray-500">No past blood requests yet.</p>
+              )}
+            </ul>
+          </div>
         </div>
-        {historyRequests.length ? (
-          <ul className="space-y-2">
-            {(showAllReqHistory ? historyRequests : historyRequests.slice(0, 6)).map((r) =>
-              renderRow(r, "request")
-            )}
-          </ul>
-        ) : (
-          <p className="text-sm text-gray-600">No past blood requests yet.</p>
-        )}
       </div>
 
-      {/* Urgent Alerts Manager */}
-      <div id="alerts" className="max-w-6xl mx-auto p-6">
-        <AlertManager bankId={id} bankName={bloodBank?.name} />
+      {/* Alerts */}
+      <div id="alerts" className="max-w-6xl mx-auto p-4">
+        <div className="ui-card p-5 bg-white">
+          <h3 className="ui-section-title mb-3">Urgent Alerts</h3>
+          <AlertManager bankId={id} bankName={bloodBank?.name} />
+        </div>
       </div>
 
       {/* Details Modal */}
       {selectedItem && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-white p-6 rounded-lg shadow-lg w-full max-w-md">
-            <h3 className="text-xl font-bold mb-4 text-red-600">
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="ui-card w-full max-w-md p-5">
+            <h3 className="ui-section-title text-red-600 mb-3">
               {modalType === "donation" ? "Donation Details" : "Blood Request Details"}
             </h3>
-            <div className="space-y-2 max-h-80 overflow-auto">
+            <div className="space-y-2 max-h-80 overflow-auto text-sm">
               {Object.entries(selectedItem).map(([k, v]) => (
-                <p key={k} className="text-sm">
-                  <strong>{k}:</strong>{" "}
+                <p key={k}>
+                  <strong className="capitalize">{k}:</strong>{" "}
                   {typeof v === "object" && v?.seconds
                     ? new Date(v.seconds * 1000).toLocaleString()
                     : String(v)}
                 </p>
               ))}
             </div>
-            <div className="flex justify-end mt-4 gap-2">
-              <button
-                className="bg-gray-500 text-white px-3 py-1 rounded hover:bg-gray-600"
-                onClick={() => setSelectedItem(null)}
-              >
+            <div className="mt-4 flex justify-end">
+              <button className="ui-btn ui-soft" onClick={() => setSelectedItem(null)}>
                 Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Profile Modal */}
+      {showEdit && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="ui-card w-full max-w-lg p-5 bg-white">
+            <h3 className="ui-section-title mb-4">Edit Blood Bank</h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div className="md:col-span-2">
+                <label className="text-xs font-medium">Name</label>
+                <input
+                  className="w-full border rounded-md px-3 py-2"
+                  value={editData.name}
+                  onChange={(e) => setEditData({ ...editData, name: e.target.value })}
+                />
+              </div>
+              <div className="md:col-span-2">
+                <label className="text-xs font-medium">Address</label>
+                <input
+                  className="w-full border rounded-md px-3 py-2"
+                  value={editData.address}
+                  onChange={(e) => setEditData({ ...editData, address: e.target.value })}
+                />
+              </div>
+              <div>
+                <label className="text-xs font-medium">City</label>
+                <input
+                  className="w-full border rounded-md px-3 py-2"
+                  value={editData.city}
+                  onChange={(e) => setEditData({ ...editData, city: e.target.value })}
+                />
+              </div>
+              <div>
+                <label className="text-xs font-medium">Contact</label>
+                <input
+                  className="w-full border rounded-md px-3 py-2"
+                  value={editData.contact}
+                  onChange={(e) => setEditData({ ...editData, contact: e.target.value })}
+                />
+              </div>
+              <div>
+                <label className="text-xs font-medium">Email</label>
+                <input
+                  className="w-full border rounded-md px-3 py-2"
+                  value={editData.email}
+                  onChange={(e) => setEditData({ ...editData, email: e.target.value })}
+                />
+              </div>
+              <div>
+                <label className="text-xs font-medium">Low stock threshold</label>
+                <input
+                  type="number"
+                  min={0}
+                  className="w-full border rounded-md px-3 py-2"
+                  value={editData.lowStockThreshold}
+                  onChange={(e) =>
+                    setEditData({ ...editData, lowStockThreshold: Number(e.target.value) })
+                  }
+                />
+              </div>
+              <div className="md:col-span-2">
+                <label className="text-xs font-medium">Banner URL (optional)</label>
+                <input
+                  className="w-full border rounded-md px-3 py-2"
+                  placeholder="https://..."
+                  value={editData.bannerUrl}
+                  onChange={(e) => setEditData({ ...editData, bannerUrl: e.target.value })}
+                />
+                <p className="text-[11px] text-gray-500 mt-1">
+                  If set, it appears behind the red gradient at the top.
+                </p>
+              </div>
+            </div>
+            <div className="mt-4 flex justify-end gap-2">
+              <button className="ui-btn ui-soft" onClick={() => setShowEdit(false)}>
+                Cancel
+              </button>
+              <button
+                className="ui-btn ui-primary"
+                onClick={async () => {
+                  try {
+                    await updateDoc(doc(db, "BloodBanks", id), {
+                      name: editData.name.trim(),
+                      address: editData.address.trim(),
+                      city: editData.city.trim(),
+                      contactNumber: editData.contact.trim(),
+                      contact: editData.contact.trim(),
+                      email: editData.email.trim(),
+                      lowStockThreshold: Number(editData.lowStockThreshold || 0),
+                      bannerUrl: editData.bannerUrl.trim(),
+                    });
+                    setShowEdit(false);
+                  } catch (e) {
+                    console.error("Update profile error:", e);
+                  }
+                }}
+              >
+                Save changes
               </button>
             </div>
           </div>
@@ -730,8 +900,3 @@ export default function BloodBankEditForm() {
     </div>
   );
 }
-
-/* CSS tip: add once in your global CSS (e.g., index.css or App.css)
-@keyframes card-shake { 0%{transform:translateX(0)} 25%{transform:translateX(-3px)} 50%{transform:translateX(3px)} 75%{transform:translateX(-3px)} 100%{transform:translateX(0)} }
-.animate-shake { animation: card-shake 0.35s ease-in-out 2; }
-*/
