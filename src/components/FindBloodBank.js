@@ -3,7 +3,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { collection, query, where, limit, getDocs } from "firebase/firestore";
 import { db } from "./firebase";
 
-const MIN_QUERY_LEN = 2;
+const MIN_QUERY_LEN = 1;
 const PAGE_LIMIT = 20;
 
 export default function FindBloodBank() {
