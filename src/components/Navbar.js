@@ -1,249 +1,171 @@
 // src/components/Navbar.js
-import React, { useEffect, useState } from "react";
-import { Link, NavLink, useNavigate } from "react-router-dom";
+import React, { useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
+import { signOut } from "firebase/auth";
 import { auth, db } from "./firebase";
-import { onAuthStateChanged, signOut } from "firebase/auth";
-import {
-  collection,
-  doc,
-  getDoc,
-  getDocs,
-  query,
-  where,
-  limit,
-} from "firebase/firestore";
-
-// Optional: keep if you have a bell component
+import { useAuth } from "./AuthContext";
+import { doc, getDoc, collection, query, where, getDocs } from "firebase/firestore";
 import NotificationBell from "./NotificationBell";
-
-// Your PNG logo lives in src/logo.png
-import logo from "../logo.png";
-
-/** Resolve the inventory edit URL for a bank user */
-async function resolveInventoryHref(uid) {
-  // 👉 Change the path below if your inventory route is different
-  const EDIT_PATH = (bankId) => `/bloodbank/${bankId}/edit`;
-
-  // Try BloodBanks/{uid} directly
-  const direct = await getDoc(doc(db, "BloodBanks", uid));
-  if (direct.exists()) return EDIT_PATH(uid);
-
-  // Fallback: find bank doc where uid == user.uid
-  const q = query(
-    collection(db, "BloodBanks"),
-    where("uid", "==", uid),
-    limit(1)
-  );
-  const snap = await getDocs(q);
-  if (!snap.empty) return EDIT_PATH(snap.docs[0].id);
-
-  return null;
-}
+import logo from "../logo.png"; // your PNG logo sitting in /src
 
 export default function Navbar() {
   const navigate = useNavigate();
+  const { user, role } = useAuth(); // expects { user, role }, where user?.uid exists when logged in
   const [open, setOpen] = useState(false);
-  const [user, setUser] = useState(null);
-  const [isBankUser, setIsBankUser] = useState(false);
-  const [inventoryHref, setInventoryHref] = useState(null);
 
-  useEffect(() => {
-    const unsub = onAuthStateChanged(auth, async (u) => {
-      setUser(u || null);
-      setIsBankUser(false);
-      setInventoryHref(null);
+  const toggle = () => setOpen((v) => !v);
+  const close = () => setOpen(false);
 
-      if (!u) return;
+  const go = (path) => {
+    navigate(path);
+    close();
+  };
 
-      try {
-        // read the user role
-        const uSnap = await getDoc(doc(db, "Users", u.uid));
-        const role = uSnap.exists() ? (uSnap.data().role || "user") : "user";
-        const bankRoles = ["bloodbank", "bank", "adminBank"];
-
-        const isBank = bankRoles.includes(role);
-        setIsBankUser(isBank);
-
-        if (isBank) {
-          const href = await resolveInventoryHref(u.uid);
-          if (href) setInventoryHref(href);
-        }
-      } catch (e) {
-        console.warn("Navbar role / inventory detection failed:", e);
+  // Robust inventory navigation for blood banks:
+  // 1) Try /BloodBanks/{uid} directly
+  // 2) Fallback to searching BloodBanks where uid == authUid
+  const goToInventory = async () => {
+    try {
+      const authUid = user?.uid || auth.currentUser?.uid;
+      if (!authUid) {
+        alert("Please sign in to access Inventory.");
+        return;
       }
-    });
-    return () => unsub();
-  }, []);
+
+      const quick = await getDoc(doc(db, "BloodBanks", authUid));
+      if (quick.exists()) {
+        go(`/bloodbank/edit/${authUid}`);
+        return;
+      }
+
+      const q = query(collection(db, "BloodBanks"), where("uid", "==", authUid));
+      const snap = await getDocs(q);
+      if (!snap.empty) {
+        const bankId = snap.docs[0].id;
+        go(`/bloodbank/edit/${bankId}`);
+        return;
+      }
+
+      alert("No blood bank found for your account. Please create one or contact support.");
+    } catch (e) {
+      console.error("Inventory navigation error:", e);
+      alert("Could not open Inventory. Please try again.");
+    }
+  };
 
   const handleLogout = async () => {
     try {
       await signOut(auth);
-      setOpen(false);
+      close();
       navigate("/login");
     } catch (e) {
       console.error("Logout error:", e);
     }
   };
 
-  const linkCls =
-    "block w-full text-left px-4 py-2 rounded hover:bg-gray-100 transition";
+  // Menu items based on role
+  const isBank = role === "bloodbank";
+  const isUser = !isBank; // default to user-style menu for any other role
 
   return (
     <>
-      {/* Top bar */}
-      <header className="sticky top-0 z-40 bg-red-600 text-white shadow">
-        <div className="max-w-6xl mx-auto px-3 h-14 flex items-center justify-between">
+      {/* Top Bar */}
+      <header className="bg-red-600 text-white sticky top-0 z-40">
+        <div className="max-w-6xl mx-auto px-4 h-14 flex items-center justify-between">
           <Link to="/" className="flex items-center gap-2">
             <img
               src={logo}
               alt="Amar Rokto"
-              className="h-6 w-6 rounded-full object-contain"
+              className="h-6 w-6 rounded-full bg-white/90 p-[2px] shadow"
             />
-            <span className="font-semibold tracking-wide">Amar Rokto</span>
+            <span className="font-semibold">Amar Rokto</span>
           </Link>
 
-          <div className="flex items-center gap-2">
-            {/* Notification bell (optional) */}
+          <div className="flex items-center gap-3">
             <NotificationBell />
-
-            {/* Hamburger */}
             <button
-              className="inline-flex items-center justify-center w-9 h-9 rounded hover:bg-white/10"
-              onClick={() => setOpen(true)}
-              aria-label="Open menu"
+              onClick={toggle}
+              className="inline-flex items-center justify-center h-9 w-9 rounded-md hover:bg-white/10"
+              aria-label="Menu"
+              title="Menu"
             >
-              <svg
-                viewBox="0 0 24 24"
-                fill="none"
-                className="w-6 h-6"
-                stroke="currentColor"
-                strokeWidth="2"
-              >
-                <path d="M4 6h16M4 12h16M4 18h16" />
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+                <path d="M4 6h16M4 12h16M4 18h16" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
               </svg>
             </button>
           </div>
         </div>
       </header>
 
-      {/* Side drawer */}
+      {/* Drawer */}
       {open && (
-        <div
-          className="fixed inset-0 z-50"
-          role="dialog"
-          aria-modal="true"
-          onClick={() => setOpen(false)}
-        >
-          {/* Backdrop */}
-          <div className="absolute inset-0 bg-black/50" />
+        <div className="fixed inset-0 z-50">
+          <div className="absolute inset-0 bg-black/40" onClick={close} />
 
-          {/* Drawer panel */}
-          <aside
-            className="absolute left-0 top-0 bottom-0 w-72 bg-white shadow-xl flex flex-col"
-            onClick={(e) => e.stopPropagation()}
-          >
-            {/* Drawer header */}
-            <div className="h-14 px-4 border-b flex items-center gap-2">
-              <img
-                src={logo}
-                alt="Amar Rokto"
-                className="h-7 w-7 rounded-full object-contain"
-              />
-              <span className="font-semibold">Amar Rokto</span>
+          <aside className="absolute left-0 top-0 h-full w-72 bg-white shadow-xl flex flex-col">
+            {/* Drawer Header */}
+            <div className="px-4 h-14 flex items-center border-b">
+              <div className="flex items-center gap-2">
+                <img src={logo} alt="logo" className="h-7 w-7 rounded-full" />
+                <div className="font-semibold">Amar Rokto</div>
+              </div>
               <button
-                className="ml-auto w-8 h-8 rounded hover:bg-gray-100 grid place-items-center"
-                onClick={() => setOpen(false)}
-                aria-label="Close menu"
+                onClick={close}
+                className="ml-auto h-8 w-8 rounded hover:bg-gray-100 grid place-items-center"
+                aria-label="Close"
               >
-                <svg
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  className="w-5 h-5"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                >
-                  <path d="M6 18L18 6M6 6l12 12" />
-                </svg>
+                ✕
               </button>
             </div>
 
-            {/* Links */}
-            <nav className="p-3 flex-1">
-              <ul className="space-y-1">
-                <li>
-                  <NavLink
-                    to="/"
-                    className={({ isActive }) =>
-                      `${linkCls} ${isActive ? "bg-gray-100" : ""}`
-                    }
-                    onClick={() => setOpen(false)}
+            {/* Drawer Body */}
+            <nav className="p-3 flex-1 space-y-1">
+              {/* Common: Home */}
+              <button onClick={() => go("/")} className="w-full text-left px-3 py-2 rounded hover:bg-gray-100">
+                Home
+              </button>
+
+              {/* Role-specific */}
+              {isBank ? (
+                <>
+                  <button onClick={goToInventory} className="w-full text-left px-3 py-2 rounded hover:bg-gray-100">
+                    Inventory
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button
+                    onClick={() => go("/donor-dashboard")}
+                    className="w-full text-left px-3 py-2 rounded hover:bg-gray-100"
                   >
-                    Home
-                  </NavLink>
-                </li>
-
-                <li>
-                  <NavLink
-                    to="/bank-dashboard"
-                    className={({ isActive }) =>
-                      `${linkCls} ${isActive ? "bg-gray-100" : ""}`
-                    }
-                    onClick={() => setOpen(false)}
+                    Donor Dashboard
+                  </button>
+                  <button
+                    onClick={() => go("/receiver-dashboard")}
+                    className="w-full text-left px-3 py-2 rounded hover:bg-gray-100"
                   >
-                    Bank Dashboard
-                  </NavLink>
-                </li>
-
-                {/* Inventory appears only for blood-bank users */}
-                {isBankUser && inventoryHref && (
-                  <li>
-                    <NavLink
-                      to={inventoryHref}
-                      className={({ isActive }) =>
-                        `${linkCls} ${isActive ? "bg-gray-100" : ""}`
-                      }
-                      onClick={() => setOpen(false)}
-                      title="Manage stock & requests"
-                    >
-                      Inventory
-                    </NavLink>
-                  </li>
-                )}
-
-                <li>
-                  <NavLink
-                    to="/profile"
-                    className={({ isActive }) =>
-                      `${linkCls} ${isActive ? "bg-gray-100" : ""}`
-                    }
-                    onClick={() => setOpen(false)}
+                    Receiver Dashboard
+                  </button>
+                  <button
+                    onClick={() => go("/profile")}
+                    className="w-full text-left px-3 py-2 rounded hover:bg-gray-100"
                   >
                     Profile
-                  </NavLink>
-                </li>
-              </ul>
+                  </button>
+                </>
+              )}
             </nav>
 
-            {/* Footer (Logout) */}
-            <div className="p-3 border-t">
-              {user ? (
-                <button
-                  onClick={handleLogout}
-                  className="w-full bg-red-600 text-white font-semibold rounded px-3 py-2 hover:bg-red-700"
-                >
-                  Logout
-                </button>
-              ) : (
-                <Link
-                  to="/login"
-                  onClick={() => setOpen(false)}
-                  className="w-full inline-block text-center bg-red-600 text-white font-semibold rounded px-3 py-2 hover:bg-red-700"
-                >
-                  Login
-                </Link>
-              )}
-              <div className="text-[11px] text-gray-500 mt-2">
-                © {new Date().getFullYear()} Amar Rokto
+            {/* Drawer Footer */}
+            <div className="mt-auto border-t p-3">
+              <button
+                onClick={handleLogout}
+                className="w-full px-3 py-2 rounded bg-red-600 text-white font-semibold hover:bg-red-700"
+              >
+                Logout
+              </button>
+              <div className="text-xs text-gray-500 mt-3">
+                &copy; {new Date().getFullYear()} Amar Rokto
               </div>
             </div>
           </aside>
