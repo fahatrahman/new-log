@@ -16,6 +16,84 @@ import bannerImage from "../ban.jpg";
 import { Users, Droplet, Building2 } from "lucide-react";
 import { Link } from "react-router-dom";
 import FindBloodBank from "./FindBloodBank";
+import PreFooterShowcase from "./PreFooterShowcase";
+import AppFooter from "./AppFooter";
+
+
+// Footer carousel images (kept in src/)
+import slide0 from "../beforefooter.jpg";
+import slide1 from "../beforefooter1.jpg";
+import slide2 from "../beforefooter2.jpg";
+import slide3 from "../beforefooter3.jpg";
+import slide4 from "../beforefooter4.jpg";
+
+/* --- Simple footer carousel (auto-play, arrows, dots) --- */
+function FooterCarousel() {
+  const sliderImages = [slide0, slide1, slide2, slide3, slide4];
+  const [idx, setIdx] = useState(0);
+  const timer = useRef(null);
+
+  useEffect(() => {
+    timer.current = setInterval(() => {
+      setIdx((i) => (i + 1) % sliderImages.length);
+    }, 4000);
+    return () => clearInterval(timer.current);
+  }, [sliderImages.length]);
+
+  const go = (n) => setIdx((n + sliderImages.length) % sliderImages.length);
+
+  return (
+    <div className="relative max-w-6xl mx-auto w-full px-4 mt-12 mb-10">
+      <div className="relative overflow-hidden rounded-2xl border border-gray-200 shadow">
+        <div className="relative h-[260px] sm:h-[360px] md:h-[420px]">
+          {sliderImages.map((src, i) => (
+            <img
+              key={src}
+              src={src}
+              alt={`Slide ${i + 1}`}
+              loading="lazy"
+              className={`absolute inset-0 h-full w-full object-cover transition-opacity duration-700 ${
+                i === idx ? "opacity-100" : "opacity-0"
+              }`}
+            />
+          ))}
+        </div>
+
+        {/* arrows */}
+        <button
+          type="button"
+          aria-label="Previous"
+          onClick={() => go(idx - 1)}
+          className="absolute left-3 top-1/2 -translate-y-1/2 bg-white/80 hover:bg-white text-gray-800 rounded-lg px-3 py-2 shadow"
+        >
+          ‹
+        </button>
+        <button
+          type="button"
+          aria-label="Next"
+          onClick={() => go(idx + 1)}
+          className="absolute right-3 top-1/2 -translate-y-1/2 bg-white/80 hover:bg-white text-gray-800 rounded-lg px-3 py-2 shadow"
+        >
+          ›
+        </button>
+
+        {/* dots */}
+        <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex gap-2">
+          {sliderImages.map((_, i) => (
+            <button
+              key={i}
+              aria-label={`Go to slide ${i + 1}`}
+              onClick={() => go(i)}
+              className={`h-2.5 w-2.5 rounded-full transition ${
+                i === idx ? "bg-red-600" : "bg-white/70"
+              }`}
+            />
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export default function Home() {
   const [showEligibilityBanner, setShowEligibilityBanner] = useState(false);
@@ -49,7 +127,7 @@ export default function Home() {
     return () => clearInterval(factTimer.current);
   }, [facts.length]);
 
-  // --- PUBLIC COUNTS (shows even when logged out) ---
+  // --- PUBLIC COUNTS ---
   useEffect(() => {
     (async () => {
       try {
@@ -66,7 +144,7 @@ export default function Home() {
     })();
   }, []);
 
-  // Blood bank count (works publicly)
+  // Blood bank count
   useEffect(() => {
     (async () => {
       try {
@@ -78,7 +156,7 @@ export default function Home() {
     })();
   }, []);
 
-  // Eligibility + alerts (unchanged)
+  // Eligibility + alerts
   useEffect(() => {
     const unsub = auth.onAuthStateChanged(async (u) => {
       if (!u) {
@@ -123,10 +201,9 @@ export default function Home() {
     return () => unsub();
   }, []);
 
-  // OPTIONAL live overrides (if rules allow — otherwise public values remain)
+  // OPTIONAL live overrides
   useEffect(() => {
     (async () => {
-      // live donor count
       try {
         const donorsQ = query(
           collection(db, "Users"),
@@ -134,11 +211,8 @@ export default function Home() {
         );
         const donorsCountSnap = await getCountFromServer(donorsQ);
         setDonorCount(donorsCountSnap.data().count);
-      } catch (e) {
-        // ignore — public value stays
-      }
+      } catch {}
 
-      // live units (last 30d)
       try {
         const start30 = new Date();
         start30.setDate(start30.getDate() - 30);
@@ -170,9 +244,7 @@ export default function Home() {
           return sum + (isNaN(u) ? 0 : u);
         }, 0);
         setUnitsDelivered30d(units);
-      } catch (e) {
-        // ignore — public value stays
-      }
+      } catch {}
     })();
   }, []);
 
@@ -216,12 +288,7 @@ export default function Home() {
             >
               Become a Donor
             </Link>
-            <a
-              href="#find"
-              className="bg-white/10 text-white font-semibold px-4 py-2 rounded-md border border-white/30 hover:bg-white/20"
-            >
-              Find Blood Bank
-            </a>
+            {/* Removed the “Find Blood Bank” button per request */}
           </div>
         </div>
       </div>
@@ -293,12 +360,12 @@ export default function Home() {
         </div>
       )}
 
-      {/* FIND BLOOD BANK */}
+      {/* FIND BLOOD BANK (section stays) */}
       <div id="find" className="max-w-5xl mx-auto px-4 w-full mt-8">
         <FindBloodBank />
       </div>
 
-      {/* DRIVES (optional – keep if you use it) */}
+      {/* DRIVES (optional) */}
       {drives.length > 0 && (
         <div className="max-w-5xl mx-auto px-4 w-full mt-10">
           <h2 className="text-xl font-semibold mb-3">Upcoming Blood Drives</h2>
@@ -329,8 +396,10 @@ export default function Home() {
         </div>
       )}
 
+      
+
       {/* FACTS */}
-      <div className="max-w-5xl mx-auto px-4 w-full mt-10 mb-12">
+      <div className="max-w-5xl mx-auto px-4 w-full mt-10">
         <div className="bg-white rounded-xl border border-gray-200 p-4 shadow-sm flex items-center justify-between">
           <div className="flex items-center gap-2">
             <div className="text-2xl">💡</div>
@@ -352,9 +421,13 @@ export default function Home() {
         </div>
       </div>
 
-      <footer className="bg-gray-900 text-gray-300 text-center py-4 mt-auto text-sm">
-        &copy; {new Date().getFullYear()} Amar Rokto. All rights reserved.
-      </footer>
+            <PreFooterShowcase />
+
+      {/* NEW: image carousel just before the footer */}
+      <FooterCarousel />
+
+      <AppFooter />
+
     </div>
   );
 }

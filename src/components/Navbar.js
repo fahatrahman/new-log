@@ -72,15 +72,15 @@ export default function Navbar() {
   return (
     <>
       {/* Top Bar */}
-      <header className="bg-red-600 text-white sticky top-0 z-40">
+      <header className="bg-red-600 text-black sticky top-0 z-40">
         <div className="max-w-6xl mx-auto px-4 h-14 flex items-center justify-between">
           <Link to="/" className="flex items-center gap-2">
             <img
               src={logo}
               alt="Amar Rokto"
-              className="h-6 w-6 rounded-full bg-white/90 p-[2px] shadow"
+              className="h-10 w-10 rounded-full bg-white/90 p-[2px] shadow"
             />
-            <span className="font-semibold">Amar Rokto</span>
+            <span className="font-bold text-black text-xl">Amar Rokto</span>
           </Link>
 
           <div className="flex items-center gap-3">
