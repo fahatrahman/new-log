@@ -1,9 +1,15 @@
 // src/components/BloodBankDetail.js
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState, lazy, Suspense } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { doc, getDoc } from "firebase/firestore";
 import { db } from "./firebase";
 import MapFromAddress from "./MapFromAddress";
+import Modal from "./Modal"; // ← uses the hooks-safe Modal you added
+
+// Lazy-load the existing page components so we can render them inside modals.
+// If your filenames differ, adjust these two lines only.
+const RequestBlood = lazy(() => import("./RequestBlood"));
+const ScheduleDonation = lazy(() => import("./ScheduleDonation"));
 
 const mapLinkForBank = (bank) => {
   const q = `${bank?.name || ""} ${bank?.address || bank?.location || bank?.city || ""}`.trim();
@@ -17,6 +23,10 @@ export default function BloodBankDetail() {
   const navigate = useNavigate();
   const [bank, setBank] = useState(null);
   const [loading, setLoading] = useState(true);
+
+  // Popup state
+  const [showRequest, setShowRequest] = useState(false);
+  const [showSchedule, setShowSchedule] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -43,22 +53,21 @@ export default function BloodBankDetail() {
 
   const StockTile = ({ label, units }) => {
     const u = Number(units || 0);
-    let tone =
-      "bg-white border border-gray-200 text-gray-800 shadow-sm"; // default
-    if (u <= 2)
-      tone = "bg-red-50 border border-red-200 text-red-700 shadow-sm";
-    else if (u >= 3)
-      tone = "bg-green-50 border border-green-200 text-green-700 shadow-sm";
+    let tone = "bg-white border border-gray-200 text-gray-800 shadow-sm";
+    if (u <= 2) tone = "bg-red-50 border border-red-200 text-red-700 shadow-sm";
+    else if (u >= 3) tone = "bg-green-50 border border-green-200 text-green-700 shadow-sm";
 
     return (
       <div className={`rounded-xl py-5 px-4 flex flex-col items-center ${tone}`}>
         <div className="text-base font-semibold">{label}</div>
-        <div className="mt-1 text-lg font-bold">{u} {u === 1 ? "unit" : "units"}</div>
+        <div className="mt-1 text-lg font-bold">
+          {u} {u === 1 ? "unit" : "units"}
+        </div>
       </div>
     );
   };
 
-  const supportedCount = Object.values(stock).filter(v => v !== undefined).length;
+  const supportedCount = Object.values(stock).filter((v) => v !== undefined).length;
 
   return (
     <div className="min-h-screen font-sans">
@@ -84,18 +93,22 @@ export default function BloodBankDetail() {
 
             {/* Quick Actions (right) */}
             <div className="flex flex-wrap gap-2">
-              <Link
-                to="/request-blood"
+              {/* Open Request form in modal */}
+              <button
+                type="button"
+                onClick={() => setShowRequest(true)}
                 className="inline-flex items-center px-4 py-2 rounded-md bg-white text-red-600 font-semibold shadow hover:bg-red-50"
               >
                 Request Blood
-              </Link>
-              <Link
-                to="/schedule-donation"
+              </button>
+              {/* Open Schedule form in modal */}
+              <button
+                type="button"
+                onClick={() => setShowSchedule(true)}
                 className="inline-flex items-center px-4 py-2 rounded-md bg-black/20 text-white font-semibold hover:bg-black/30"
               >
                 Schedule Donation
-              </Link>
+              </button>
               <a
                 href={mapLinkForBank(bank)}
                 target="_blank"
@@ -104,6 +117,10 @@ export default function BloodBankDetail() {
               >
                 Open in Maps
               </a>
+
+              {/* Accessible fallbacks for non-JS users (kept but visually hidden) */}
+              <Link to="/request-blood" className="sr-only">Request Blood (fallback)</Link>
+              <Link to="/schedule-donation" className="sr-only">Schedule Donation (fallback)</Link>
             </div>
           </div>
         </div>
@@ -116,19 +133,13 @@ export default function BloodBankDetail() {
           <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-5">
             <div className="text-sm text-gray-500 font-semibold">Supported Groups</div>
             <div className="mt-1 text-2xl font-bold text-gray-900">{supportedCount}</div>
-            <div className="mt-2 text-xs text-gray-500">
-              Total groups with any recorded stock.
-            </div>
+            <div className="mt-2 text-xs text-gray-500">Total groups with any recorded stock.</div>
           </div>
 
           <div className="bg-red-50 rounded-2xl shadow-lg border border-red-200 p-5">
             <div className="text-sm text-red-700 font-semibold">City</div>
-            <div className="mt-1 text-2xl font-bold text-red-800">
-              {bank.city || "—"}
-            </div>
-            <div className="mt-2 text-xs text-red-700/80">
-              City information (if provided by the bank).
-            </div>
+            <div className="mt-1 text-2xl font-bold text-red-800">{bank.city || "—"}</div>
+            <div className="mt-2 text-xs text-red-700/80">City information (if provided by the bank).</div>
           </div>
 
           <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-5">
@@ -136,9 +147,7 @@ export default function BloodBankDetail() {
             <div className="mt-1 text-2xl font-bold text-gray-900">
               {bank.contact || bank.email ? "Available" : "Missing"}
             </div>
-            <div className="mt-2 text-xs text-gray-500">
-              Phone and/or email presence.
-            </div>
+            <div className="mt-2 text-xs text-gray-500">Phone and/or email presence.</div>
           </div>
         </div>
 
@@ -146,7 +155,7 @@ export default function BloodBankDetail() {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Left: Overview + Contact */}
           <div className="space-y-6 lg:col-span-1">
-            {/* Overview Card (white) */}
+            {/* Overview Card */}
             <div className="bg-white rounded-2xl border border-gray-200 shadow-lg p-5">
               <div className="text-sm font-semibold text-gray-700 mb-2">Overview</div>
               <div className="text-sm text-gray-700">
@@ -168,7 +177,7 @@ export default function BloodBankDetail() {
               )}
             </div>
 
-            {/* Contact Card (soft red) */}
+            {/* Contact Card */}
             <div className="bg-red-50 rounded-2xl border border-red-200 shadow-lg p-5">
               <div className="text-sm font-semibold text-red-800 mb-2">Contact</div>
               {bank.contact || bank.email ? (
@@ -185,13 +194,11 @@ export default function BloodBankDetail() {
 
           {/* Right: Stock + Map */}
           <div className="space-y-6 lg:col-span-2">
-            {/* Stock Grid (white) */}
+            {/* Stock Grid */}
             <div className="bg-white rounded-2xl border border-gray-200 shadow-lg p-5">
               <div className="flex items-center justify-between mb-3">
                 <div className="text-sm font-semibold text-gray-700">Available Blood Units</div>
-                <div className="text-xs text-gray-500">
-                  Updated as recorded by the bank
-                </div>
+                <div className="text-xs text-gray-500">Updated as recorded by the bank</div>
               </div>
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
                 {GROUPS.map((g) => (
@@ -200,7 +207,7 @@ export default function BloodBankDetail() {
               </div>
             </div>
 
-            {/* Map Card (soft red) */}
+            {/* Map Card */}
             <div className="bg-red-50 rounded-2xl border border-red-200 shadow-lg p-5">
               <div className="flex items-center justify-between mb-2">
                 <div className="text-sm font-semibold text-red-800">Location</div>
@@ -218,6 +225,31 @@ export default function BloodBankDetail() {
           </div>
         </div>
       </div>
+
+      {/* ---------- POPUP FORMS ---------- */}
+      <Modal
+        open={showRequest}
+        onClose={() => setShowRequest(false)}
+        title="Request Blood"
+        maxWidth="max-w-2xl"
+      >
+        <Suspense fallback={<div className="p-4">Loading form…</div>}>
+          {/* Pass bank context if your form supports it */}
+          <RequestBlood defaultBankId={id} defaultBloodBankName={bank.name} />
+        </Suspense>
+      </Modal>
+
+      <Modal
+        open={showSchedule}
+        onClose={() => setShowSchedule(false)}
+        title="Schedule a Donation"
+        maxWidth="max-w-2xl"
+      >
+        <Suspense fallback={<div className="p-4">Loading form…</div>}>
+          {/* Pass bank context if your form supports it */}
+          <ScheduleDonation defaultBankId={id} defaultBloodBankName={bank.name} />
+        </Suspense>
+      </Modal>
     </div>
   );
 }

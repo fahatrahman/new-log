@@ -19,6 +19,10 @@ import FindBloodBank from "./FindBloodBank";
 import PreFooterShowcase from "./PreFooterShowcase";
 import AppFooter from "./AppFooter";
 
+// ✨ NEW: modal + form components (make sure these files exist)
+import Modal from "./Modal";
+import RequestBlood from "./RequestBlood";
+import ScheduleDonation from "./ScheduleDonation";
 
 // Footer carousel images (kept in src/)
 import slide0 from "../beforefooter.jpg";
@@ -118,6 +122,10 @@ export default function Home() {
   );
   const [factIdx, setFactIdx] = useState(0);
   const factTimer = useRef(null);
+
+  // ✨ NEW: modal toggles
+  const [openRequest, setOpenRequest] = useState(false);
+  const [openSchedule, setOpenSchedule] = useState(false);
 
   useEffect(() => {
     factTimer.current = setInterval(
@@ -276,19 +284,22 @@ export default function Home() {
             blood banks. Every drop matters.
           </p>
           <div className="mt-4 flex gap-2">
-            <Link
-              to="/request-blood"
+            {/* ✨ Open forms in modal instead of navigating */}
+            <button
+              type="button"
+              onClick={() => setOpenRequest(true)}
               className="bg-white text-red-600 font-semibold px-4 py-2 rounded-md shadow hover:bg-red-50"
             >
               Request Blood
-            </Link>
-            <Link
-              to="/schedule-donation"
+            </button>
+            <button
+              type="button"
+              onClick={() => setOpenSchedule(true)}
               className="bg-red-600/90 text-white font-semibold px-4 py-2 rounded-md shadow hover:bg-red-700"
             >
               Become a Donor
-            </Link>
-            {/* Removed the “Find Blood Bank” button per request */}
+            </button>
+            {/* “Find Blood Bank” CTA intentionally removed as requested */}
           </div>
         </div>
       </div>
@@ -396,8 +407,6 @@ export default function Home() {
         </div>
       )}
 
-      
-
       {/* FACTS */}
       <div className="max-w-5xl mx-auto px-4 w-full mt-10">
         <div className="bg-white rounded-xl border border-gray-200 p-4 shadow-sm flex items-center justify-between">
@@ -421,13 +430,33 @@ export default function Home() {
         </div>
       </div>
 
-            <PreFooterShowcase />
+      <PreFooterShowcase />
 
       {/* NEW: image carousel just before the footer */}
       <FooterCarousel />
 
       <AppFooter />
 
+      {/* ✨ MODALS */}
+      <Modal
+        open={openRequest}
+        onClose={() => setOpenRequest(false)}
+        title="Request Blood"
+        maxWidth="max-w-3xl"
+      >
+        {/* If RequestBlood supports an onDone callback, it'll close on success */}
+        <RequestBlood inModal onDone={() => setOpenRequest(false)} />
+      </Modal>
+
+      <Modal
+        open={openSchedule}
+        onClose={() => setOpenSchedule(false)}
+        title="Schedule Donation"
+        maxWidth="max-w-3xl"
+      >
+        {/* If ScheduleDonation supports an onDone callback, it'll close on success */}
+        <ScheduleDonation inModal onDone={() => setOpenSchedule(false)} />
+      </Modal>
     </div>
   );
 }
